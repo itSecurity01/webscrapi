@@ -52,7 +52,7 @@ function dashboardView(drafts, resolveThumb, notice) {
             </div>
             <div>
               <label>Gender</label>
-              <input type="text" name="gender" placeholder="e.g. Men / Women / Unisex">
+              <input type="text" name="gender" placeholder="men / women / kids (only these 3 are valid)">
             </div>
             <div>
               <label>Categories (comma-separated ids)</label>

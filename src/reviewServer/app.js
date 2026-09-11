@@ -8,6 +8,11 @@ const { productView } = require("./views/productView");
 function splitList(raw) {
     return String(raw || "")
         .split(/[,\n]/)
+        .map(s => s.trim().replace(/^["']+|["']+$/g, "")) // strip stray quotes
+        // left over from pasting *inside* a JSON array literal, e.g. an id
+        // copied as `a", "b", "c` (see toCampaignDocument.js's sanitizeId
+        // for the full story) — this stops it at entry instead of relying
+        // on the transform step to clean it up later.
         .map(s => s.trim())
         .filter(Boolean);
 }

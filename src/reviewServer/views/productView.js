@@ -65,7 +65,7 @@ function productView(draft, imageUrls, { saved = false } = {}) {
             </div>
             <div>
               <label>Gender</label>
-              <input type="text" name="gender" value="${esc(draft.gender)}" placeholder="Men / Women / Unisex">
+              <input type="text" name="gender" value="${esc(draft.gender)}" placeholder="men / women / kids (only these 3 are valid)">
             </div>
             <div>
               <label>Categories (comma-separated ids)</label>

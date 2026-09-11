@@ -41,6 +41,21 @@ function checkObjectId(value, label, warnings) {
 }
 
 /**
+ * Strips stray quote/bracket characters that sometimes creep into a pasted
+ * ObjectId — e.g. copy-pasting from *inside* a JSON array literal
+ * (`["a", "b", "c"]`) starting just after the opening `"` and ending just
+ * before the closing `"` leaves the middle items quoted but the first/last
+ * one only half-quoted (`a", "b", "c` split on "," -> `a"`, `"b"`, `"c`).
+ * `splitList` in reviewServer/app.js only trims whitespace, so this is the
+ * backstop that actually cleans it up before it reaches Mongo. Safe no-op on
+ * an already-clean id.
+ */
+function sanitizeId(value) {
+    if (typeof value !== "string") return value;
+    return value.replace(/["'[\]]/g, "").trim();
+}
+
+/**
  * @param {object} draft - an upload.json draft (as produced by toUploadSchema + review edits)
  * @param {object} [options]
  * @param {string} [options.status] - explicit campaignSchema `status` to set
@@ -53,17 +68,25 @@ function toCampaignDocument(draft, { status } = {}) {
     const meta = draft._meta || {};
     const warnings = [];
 
+    // Sanitize every ObjectId-shaped field up front — see sanitizeId() for
+    // why stray quotes show up here in the first place. Everything below
+    // reads from these cleaned values, not draft.program/draft.categories
+    // directly, so a dirty upload.json (old or new) always combines clean.
+    const program = sanitizeId(draft.program || "");
+    const categories = (draft.categories || []).map(sanitizeId);
+    const selectedAffiliates = (draft.selectedAffiliates || []).map(sanitizeId);
+
     if (!draft.name) warnings.push("name is empty (required by the schema)");
-    if (!draft.program) warnings.push("program is empty (required by the schema — insert will fail without it)");
-    checkObjectId(draft.program, "program", warnings);
-    (draft.categories || []).forEach(id => checkObjectId(id, "categories entry", warnings));
+    if (!program) warnings.push("program is empty (required by the schema — insert will fail without it)");
+    checkObjectId(program, "program", warnings);
+    categories.forEach(id => checkObjectId(id, "categories entry", warnings));
 
     // Not product data — the account these shared/store campaigns should be
     // attributed to. Not required by the schema (no `required: true` on
     // userId). Normally already set on the draft (toUploadSchema.js's
     // DEFAULT_USER_ID); DEFAULT_CAMPAIGN_USER_ID is a batch-wide override/
     // fallback for drafts that don't have one (e.g. hand-built ones).
-    const userId = draft.userId || process.env.DEFAULT_CAMPAIGN_USER_ID || "";
+    const userId = sanitizeId(draft.userId || process.env.DEFAULT_CAMPAIGN_USER_ID || "");
     if (!userId) warnings.push("userId is empty — set DEFAULT_CAMPAIGN_USER_ID in .env (or fill in draft.userId) if this campaign should be attributed to a specific user");
     checkObjectId(userId, "userId", warnings);
 
@@ -87,10 +110,10 @@ function toCampaignDocument(draft, { status } = {}) {
         discount: clampNumber(draft.discount, 0, 100),
         rating: clampNumber(draft.rating, 0, 5),
         vendorComment: draft.vendorComment || "",
-        program: draft.program || "",
-        categories: draft.categories || [],
+        program: program || "",
+        categories,
         allowForAffiliate: draft.allowForAffiliate || "all",
-        selectedAffiliates: draft.selectedAffiliates || [],
+        selectedAffiliates,
         productSizes: draft.productSizes || [],
         colour: draft.colour || [],
         image: draft.image || "",
@@ -119,4 +142,4 @@ function toCampaignDocument(draft, { status } = {}) {
     return { document, warnings };
 }
 
-module.exports = { toCampaignDocument, normalizeGender, clampNumber, OBJECT_ID_RE };
+module.exports = { toCampaignDocument, normalizeGender, clampNumber, sanitizeId, OBJECT_ID_RE };
