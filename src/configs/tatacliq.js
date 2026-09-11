@@ -36,14 +36,35 @@ module.exports = {
         // of the page white) and extraction fails with `product.name` null.
         // Wait for real product content to actually appear before touching
         // anything else.
+        //
+        // PERF FIX (2026-09-11): this used to be a single waitForSelector()
+        // over a comma-joined list that mixed the two DOM elements *and*
+        // 'script[type="application/ld+json"]', with the default
+        // state: "visible". A <script> tag can never be visible, and
+        // Playwright's combined-selector matching resolves to the first
+        // DOM-order match across the whole list — on this page the JSON-LD
+        // script sits earlier in the DOM than the product content, so the
+        // wait kept re-resolving to that permanently-invisible node and
+        // burned the *entire* 20s timeout on every single product, even
+        // though the real content was ready in a few seconds (confirmed by
+        // instrumented timing runs against live product pages). That's why
+        // skipping image downloads didn't speed anything up — the cost was
+        // this dead wait, not images.
+        //
+        // The obvious fix (race the DOM wait against a plain "script tag
+        // attached" wait) turned out to be its own trap: TataCliq already
+        // has 1-2 *non-product* ld+json scripts (tracking/breadcrumb
+        // schema) attached within ~1s of navigation, well before the real
+        // product data exists — so that race just resolved instantly every
+        // time and extraction ran too early, coming back with nulls. An
+        // instrumented poll confirmed the DOM element becoming visible and
+        // the actual Product JSON-LD landing happen together, ~4-8s in, so
+        // the DOM selector alone is the correct — and sufficient — readiness
+        // signal; no need to special-case the script tag at all.
         await page
             .waitForSelector(
-                [
-                    ".ProductDetailsMainCard__productName",
-                    ".ProductGalleryDesktopUpdated__images",
-                    'script[type="application/ld+json"]',
-                ].join(", "),
-                { timeout: 20000 }
+                [".ProductDetailsMainCard__productName", ".ProductGalleryDesktopUpdated__images"].join(", "),
+                { timeout: 15000, state: "visible" }
             )
             .catch(() => {});
 

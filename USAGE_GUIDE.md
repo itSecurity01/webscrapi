@@ -549,7 +549,7 @@ alongside the scraper's own log entries (`stage: "upload"`).
 Without `UPLOAD_API_URL` set, the uploader refuses to run at all (except
 `--dry-run`) rather than failing confusingly partway through.
 
-### 3.3b Alternative to Step 3's plain output — a file ready for direct MongoDB import (`npm run to-mongo-import`)
+### 3.3b Alternative to Step 3's plain output — a file ready for direct MongoDB import (`npm run to-mongo-import` / `npm run import-to-mongo`)
 
 `combined_uploads.json`'s `program`/`categories` are plain hex strings —
 correct for `npm run upload-mongo` below (Mongoose casts them), but a plain
@@ -582,6 +582,29 @@ silently producing bad data. Then:
 ```bash
 mongoimport --uri="<connection string>" --collection=campaigns --jsonArray --file=output/combined_uploads.mongoimport.json
 ```
+
+**Copy-pasting into Atlas's Data Explorer / mongosh instead of `mongoimport`?**
+Use `npm run import-to-mongo` instead — same conversion, but `program`/
+`categories`/`userId`/`selectedAffiliates` come out as `ObjectId("...")`
+shell-literal syntax (not `{ "$oid": "..." }`), because that's what a
+mongosh `insertMany([...])` paste needs to actually evaluate as JS:
+
+```bash
+npm run import-to-mongo                                      # output/combined_uploads.json -> output/combined_uploads.atlas.js
+```
+
+```json
+// program/categories/userId in output/combined_uploads.atlas.js
+"userId": ObjectId("69171c93bcfa5a8226ceb284"),
+"program": ObjectId("6a701e1762cb7e5da9887788"),
+"categories": [ObjectId("68be966d8bb9294fe8f2cea5"), ObjectId("68be96578bb9294fe8f2ce9f")]
+```
+
+Paste the resulting array into Atlas's `>_MONGOSH` shell (or a local
+`mongosh`) as `db.campaigns.insertMany(<paste the array>)`. This is
+literally `node src/toMongoImportJson.js --shell` under the hood — `npm run
+to-mongo-import` is the same script's Extended-JSON default, for
+`mongoimport`/Compass instead.
 
 Note `mongoimport` talks straight to the database — it does **not** run
 your Mongoose schema's `required`/`enum`/`min`/`max` checks (there's no
@@ -645,6 +668,7 @@ the same product. Failures are logged to `logs/YYYY-MM-DD.json`
 | `node src/uploader.js` exits immediately with an error about `UPLOAD_API_URL` | Expected until you have the real endpoint — use `--dry-run` in the meantime |
 | `node src/uploadToMongo.js` exits immediately with an error about `MONGODB_URI` | Same idea — set it in `.env`, or use `--dry-run`, which validates without connecting at all |
 | Imported via `mongoimport`/Compass and `program`/`categories` show up as strings in the database, not ObjectId | You imported `combined_uploads.json` directly — run `npm run to-mongo-import` first (§3.3b) and import the `.mongoimport.json` file it produces instead |
+| Pasted into Atlas's Data Explorer / mongosh and `program`/`categories`/`userId` show up as strings, not ObjectId | You pasted `combined_uploads.json` directly — run `npm run import-to-mongo` first (§3.3b) and paste the `.atlas.js` array it produces instead |
 | `Cast to ObjectId failed ... at path "program"` (or `categories`) | That field isn't a real 24-hex-character Mongo ObjectId — `combine-uploads` already warns about this at combine time (§3.3), but `uploadToMongo.js --dry-run` is the authoritative check since it runs the actual schema |
 | `` `unisex` is not a valid enum value for path `gender` `` (or similar) | The schema's `gender` enum is only `men`/`women`/`kids` — `combine-uploads` already drops unmapped values rather than sending them (§3.3), so seeing this means a document didn't go through that step, e.g. `combined_uploads.json` was hand-edited or built with `--format=raw` |
 | Re-ran `npm run transform` and lost edits | You (or a script) passed `--force` — it intentionally overwrites existing `upload.json` files; omit `--force` for normal re-runs |

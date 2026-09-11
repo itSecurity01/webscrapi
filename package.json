@@ -14,6 +14,7 @@
     "check-duplicates": "node src/checkDuplicates.js",
     "upload-mongo": "node src/uploadToMongo.js",
     "to-mongo-import": "node src/toMongoImportJson.js",
+    "import-to-mongo": "node src/toMongoImportJson.js --shell",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

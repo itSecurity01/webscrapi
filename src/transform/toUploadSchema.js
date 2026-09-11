@@ -10,7 +10,7 @@
 // Every product from this pipeline is attributed to the same account by
 // default — override per-draft during review (or override the whole batch
 // via DEFAULT_CAMPAIGN_USER_ID, see toCampaignDocument.js) if that changes.
-const DEFAULT_USER_ID = "69171c93bcfa5a8226ceb284";
+const DEFAULT_USER_ID = "68a404def358202d178e6b6a";
 
 /** Strip everything but digits/dot from a raw numeric-ish string ("1,999" -> 1999). */
 function parseNumber(raw) {
