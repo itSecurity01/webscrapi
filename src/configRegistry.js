@@ -3,6 +3,8 @@ const levis = require("./configs/levis");
 const hm = require("./configs/hm");
 const shopsy = require("./configs/shopsy");
 const tatacliq = require("./configs/tatacliq");
+const wishluck = require("./configs/wishluck");
+const muscleblaze = require("./configs/muscleblaze");
 const booksToScrapeDemo = require("./configs/booksToScrapeDemo");
 
 // Adding a new website = one new config file + one new entry here.
@@ -13,5 +15,7 @@ module.exports = [
     { test: (hostname) => hostname.includes("hm.com"), config: hm },
     { test: (hostname) => hostname.includes("shopsy"), config: shopsy },
     { test: (hostname) => hostname.includes("tatacliq"), config: tatacliq },
+    { test: (hostname) => hostname.includes("wishluck"), config: wishluck },
+    { test: (hostname) => hostname.includes("muscleblaze"), config: muscleblaze },
     { test: (hostname) => hostname.includes("books.toscrape.com"), config: booksToScrapeDemo },
 ];

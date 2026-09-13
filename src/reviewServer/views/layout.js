@@ -53,7 +53,7 @@ function layout(title, bodyHtml) {
 </head>
 <body>
 <header>
-  <a href="/">Upload Review</a>
+  <div><a href="/">Upload Review</a> &nbsp;·&nbsp; <a href="/batch">Batch</a></div>
   <span class="muted" style="color:#ccc">${esc(title)}</span>
 </header>
 <main>${bodyHtml}</main>

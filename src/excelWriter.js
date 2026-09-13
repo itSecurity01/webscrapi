@@ -1,4 +1,5 @@
 const ExcelJS = require("exceljs");
+const { resolveUrlCell } = require("./excelReader");
 
 /**
  * Mirrors run results back into the source Excel file so progress is
@@ -38,11 +39,15 @@ async function writeResultsBack(filePath, results) {
 
     sheet.eachRow((row, rowNumber) => {
         if (rowNumber === 1) return;
-        const urlCell = row.getCell(columnIndex.url).value;
-        const url = urlCell && typeof urlCell === "object" && urlCell.text ? urlCell.text : urlCell;
+        // Must resolve a row's URL the exact same way readExcel() does (real
+        // hyperlink target over display text, rich-text runs joined, scheme
+        // normalized) — `results`'s keys are readExcel()'s resolved URLs, so
+        // matching on anything looser here (e.g. the old `.text`-only check)
+        // silently drops the write-back for hyperlink/rich-text rows.
+        const url = resolveUrlCell(row.getCell(columnIndex.url));
         if (!url) return;
 
-        const result = results.get(String(url).trim());
+        const result = results.get(url);
         if (!result) return;
 
         row.getCell(statusCol).value = result.status;

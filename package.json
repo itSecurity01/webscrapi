@@ -11,10 +11,13 @@
     "review": "node src/reviewServer.js",
     "upload": "node src/uploader.js",
     "combine-uploads": "node src/combineUploads.js",
+    "mark-uploaded": "node src/markUploaded.js",
     "check-duplicates": "node src/checkDuplicates.js",
     "upload-mongo": "node src/uploadToMongo.js",
     "to-mongo-import": "node src/toMongoImportJson.js",
     "import-to-mongo": "node src/toMongoImportJson.js --shell",
+    "export-mongo": "node src/exportForMongo.js",
+    "archive-batch": "node src/archiveBatch.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -27,6 +30,7 @@
     "exceljs": "^4.4.0",
     "express": "^4.22.2",
     "mongoose": "^9.10.0",
+    "multer": "^2.3.0",
     "p-limit": "^2.3.0",
     "playwright": "^1.63.0",
     "zod": "^4.6.1"

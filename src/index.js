@@ -14,7 +14,7 @@ const { RunState } = require("./runState");
 const { DomainRateLimiter } = require("./utils/rateLimiter");
 const logger = require("./utils/logger");
 
-const PRODUCT_CONCURRENCY = parseInt(process.env.PRODUCT_CONCURRENCY || "1", 10);
+const PRODUCT_CONCURRENCY = parseInt(process.env.PRODUCT_CONCURRENCY || "2", 10);
 const IMAGE_CONCURRENCY = parseInt(process.env.IMAGE_CONCURRENCY || "5", 10);
 const MAX_RETRIES = parseInt(process.env.MAX_RETRIES || "2", 10);
 const DOMAIN_DELAY_MS = parseInt(process.env.DOMAIN_DELAY_MS || "800", 10);
@@ -200,7 +200,9 @@ async function main() {
     }
 }
 
-main().catch(async (error) => {
-    console.error("Fatal error:", error);
-    process.exit(1);
-});
+if (require.main === module) {
+    main().catch(async (error) => {
+        console.error("Fatal error:", error);
+        process.exit(1);
+    });
+}

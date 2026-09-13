@@ -24,12 +24,58 @@ function row(draft, thumbUrl) {
     </tr>`;
 }
 
-function dashboardView(drafts, resolveThumb, notice) {
+function exportPanel(lastArchive, draftCount) {
+    const archiveNote = lastArchive
+        ? `<p class="muted">Last archived: ${lastArchive.productCount} product(s) &rarr; <code>${esc(lastArchive.batchDir)}</code> (${esc(lastArchive.archivedAt)})</p>`
+        : "";
+
+    return `
+      <div class="panel">
+        <h2>Export to Mongo</h2>
+        <p class="muted" style="margin-top:-6px;">Combines every reviewed draft, converts <code>program</code>/<code>categories</code>/<code>userId</code> to real ObjectIds, and gives you a paste-into-mongosh file. Drafts already marked "uploaded" are skipped automatically.</p>
+        <form method="post" action="/export-mongo">
+          <div class="row">
+            <div>
+              <label>Site filter (optional)</label>
+              <input type="text" name="site" placeholder="leave blank for all sites">
+            </div>
+            <div>
+              <label>Format</label>
+              <select name="format">
+                <option value="shell">mongosh paste (ObjectId syntax)</option>
+                <option value="json">Extended JSON (for mongoimport/Compass)</option>
+              </select>
+            </div>
+          </div>
+          <label style="margin-top:14px;">
+            <input type="checkbox" name="includeUploaded" value="1" style="width:auto;display:inline-block;vertical-align:middle;">
+            Include already-"uploaded" drafts too
+          </label>
+          <div style="margin-top:14px;">
+            <button type="submit">Generate Mongo import</button>
+          </div>
+        </form>
+      </div>
+      <div class="panel">
+        <h2>Archive this batch</h2>
+        <p class="muted" style="margin-top:-6px;">Moves every scraped product out of <code>output/</code> (and resets <code>state/run.json</code>) into a timestamped <code>archive/</code> folder — nothing is deleted, just moved aside — so the next Excel file starts from a clean workspace.</p>
+        ${archiveNote}
+        <form method="post" action="/archive-batch" onsubmit="return confirm('Archive all ${draftCount} product(s) and clear the workspace for a new batch? Nothing is deleted \\u2014 it all moves into archive/.');">
+          <button type="submit" class="secondary">Archive &amp; start new batch</button>
+        </form>
+      </div>`;
+}
+
+function dashboardView(drafts, resolveThumb, notice, lastArchive) {
     if (drafts.length === 0) {
+        const noticeHtml = notice
+            ? `<div class="panel" style="background:${notice.type === "error" ? "#fee2e2" : "#d1fae5"}; color:${notice.type === "error" ? "#991b1b" : "#065f46"};">${esc(notice.text)}</div>`
+            : "";
         return layout("Upload Review", `
+          ${noticeHtml}
           <div class="panel">
             <h2>No drafts found</h2>
-            <p class="muted">Run <code>npm run transform</code> after scraping to generate upload.json drafts, then reload this page.</p>
+            <p class="muted">Upload an Excel file and run a scrape from the <a href="/batch">Batch</a> page, then run <code>npm run transform</code> to generate upload.json drafts, then reload this page.</p>
           </div>`);
     }
 
@@ -89,6 +135,8 @@ function dashboardView(drafts, resolveThumb, notice) {
           <tbody>${rows}</tbody>
         </table>
       </div>
+
+      ${exportPanel(lastArchive, drafts.length)}
 
       <script>
         function updateSelectedCount() {

@@ -130,8 +130,10 @@ async function main() {
     }
 }
 
-main().catch(async (error) => {
-    console.error("Fatal error:", error);
-    try { await mongoose.disconnect(); } catch {}
-    process.exit(1);
-});
+if (require.main === module) {
+    main().catch(async (error) => {
+        console.error("Fatal error:", error);
+        try { await mongoose.disconnect(); } catch {}
+        process.exit(1);
+    });
+}

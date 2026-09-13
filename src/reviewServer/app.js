@@ -1,9 +1,25 @@
+const fs = require("fs");
 const path = require("path");
 const express = require("express");
+const multer = require("multer");
 
 const store = require("./dataStore");
+const scrapeRunner = require("./scrapeRunner");
+const pipelineState = require("./pipelineState");
 const { dashboardView } = require("./views/dashboard");
 const { productView } = require("./views/productView");
+const { batchView } = require("./views/batchView");
+const { exportResultView } = require("./views/exportResultView");
+const { readExcel } = require("../excelReader");
+const { findDuplicates } = require("../checkDuplicates");
+const { RunState } = require("../runState");
+const { exportForMongo } = require("../exportForMongo");
+const { markUploaded } = require("../markUploaded");
+const { archiveBatch } = require("../archiveBatch");
+
+const PROJECT_ROOT = path.join(__dirname, "..", "..");
+const INPUT_XLSX_PATH = path.join(PROJECT_ROOT, "input", "products.xlsx");
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 function splitList(raw) {
     return String(raw || "")
@@ -51,8 +67,16 @@ function createApp() {
             ? { type: "error", text: "Nothing was changed — tick the checkbox next to at least one product before clicking Apply." }
             : req.query.bulkApplied
                 ? { type: "ok", text: `Applied to ${req.query.bulkApplied} product(s).` }
-                : null;
-        res.send(dashboardView(drafts, resolveThumb, notice));
+                : req.query.marked
+                    ? { type: "ok", text: `Marked ${req.query.marked} product(s) as uploaded.${req.query.markFailed > 0 ? ` (${req.query.markFailed} failed — see terminal/logs.)` : ""}` }
+                    : req.query.markError
+                        ? { type: "error", text: req.query.markError }
+                        : req.query.archived
+                            ? { type: "ok", text: `Archived ${req.query.archived} product(s) — workspace is clean for the next batch.` }
+                            : req.query.archiveError
+                                ? { type: "error", text: req.query.archiveError }
+                                : null;
+        res.send(dashboardView(drafts, resolveThumb, notice, pipelineState.getLastArchive()));
     });
 
     app.get("/product/:site/:slug", (req, res) => {
@@ -119,6 +143,136 @@ function createApp() {
 
         store.bulkUpdate(items, updates, { status });
         res.redirect(`/?bulkApplied=${items.length}`);
+    });
+
+    // --- Batch: upload an Excel file and run the scrape from the browser (Feature 5a/5b) ---
+
+    app.get("/batch", (req, res) => {
+        const status = scrapeRunner.getStatus();
+        let runSummary = null;
+        if (status.state === "running" || status.state === "done" || status.state === "failed") {
+            runSummary = new RunState().summary();
+        }
+        const notice = req.query.uploadError
+            ? { type: "error", text: req.query.uploadError }
+            : req.query.startError
+                ? { type: "error", text: req.query.startError }
+                : null;
+
+        res.send(batchView({ status, pendingUpload: scrapeRunner.getPendingUpload(), runSummary, notice }));
+    });
+
+    app.post("/batch/upload", upload.single("excel"), async (req, res) => {
+        if (!req.file) {
+            return res.redirect("/batch?uploadError=" + encodeURIComponent("No file was received — pick a .xlsx file first."));
+        }
+
+        try {
+            fs.mkdirSync(path.dirname(INPUT_XLSX_PATH), { recursive: true });
+            fs.writeFileSync(INPUT_XLSX_PATH, req.file.buffer);
+
+            const rows = await readExcel(INPUT_XLSX_PATH);
+            if (rows.length === 0) {
+                return res.redirect("/batch?uploadError=" + encodeURIComponent('No usable rows found — check the "url" column has values.'));
+            }
+
+            const { totalRows, distinctUrls, dupes, dupeRowCount } = findDuplicates(rows);
+            scrapeRunner.setPendingUpload({
+                inputPath: "input/products.xlsx",
+                totalRows,
+                distinctUrls,
+                dupes,
+                dupeRowCount,
+            });
+            res.redirect("/batch");
+        } catch (error) {
+            res.redirect("/batch?uploadError=" + encodeURIComponent(error.message));
+        }
+    });
+
+    app.post("/batch/start", (req, res) => {
+        const pending = scrapeRunner.getPendingUpload();
+        if (!pending) {
+            return res.redirect("/batch?startError=" + encodeURIComponent("Nothing to start — upload a file first."));
+        }
+
+        try {
+            scrapeRunner.startScrape({ inputPath: pending.inputPath });
+            res.redirect("/batch");
+        } catch (error) {
+            res.redirect("/batch?startError=" + encodeURIComponent(error.message));
+        }
+    });
+
+    app.post("/batch/stop", (req, res) => {
+        scrapeRunner.stopScrape();
+        res.redirect("/batch");
+    });
+
+    app.post("/batch/reset", (req, res) => {
+        try {
+            scrapeRunner.clearJob();
+        } catch {
+            // still running — ignore, /batch will just show the running state again
+        }
+        res.redirect("/batch");
+    });
+
+    // --- Export to Mongo / mark uploaded / archive (Feature 5c/5d/5e) ---
+
+    app.post("/export-mongo", (req, res) => {
+        const body = req.body;
+        const args = {
+            site: body.site ? body.site.trim() : null,
+            json: body.format === "json",
+            includeUploaded: body.includeUploaded === "1",
+        };
+
+        try {
+            const result = exportForMongo(args);
+            pipelineState.setLastExport(result);
+            res.redirect("/export-mongo");
+        } catch (error) {
+            res.status(500).send(`Export failed: ${error.message}`);
+        }
+    });
+
+    app.get("/export-mongo", (req, res) => {
+        const lastExport = pipelineState.getLastExport();
+        const fileContents = lastExport && fs.existsSync(lastExport.mongoFile)
+            ? fs.readFileSync(lastExport.mongoFile, "utf8")
+            : "";
+        res.send(exportResultView(lastExport, fileContents));
+    });
+
+    app.get("/export-mongo/download", (req, res) => {
+        const lastExport = pipelineState.getLastExport();
+        if (!lastExport || !fs.existsSync(lastExport.mongoFile)) return res.status(404).send("No export available — generate one first.");
+        res.download(lastExport.mongoFile);
+    });
+
+    app.post("/mark-uploaded", (req, res) => {
+        const lastExport = pipelineState.getLastExport();
+        if (!lastExport) {
+            return res.redirect("/?markError=" + encodeURIComponent("No export to mark — generate a Mongo import first."));
+        }
+
+        try {
+            const result = markUploaded(lastExport.manifestFile);
+            res.redirect(`/?marked=${result.marked}&markFailed=${result.failed}`);
+        } catch (error) {
+            res.redirect("/?markError=" + encodeURIComponent(error.message));
+        }
+    });
+
+    app.post("/archive-batch", (req, res) => {
+        try {
+            const result = archiveBatch({ input: "input/products.xlsx" });
+            pipelineState.setLastArchive(result);
+            res.redirect(`/?archived=${result.productCount}`);
+        } catch (error) {
+            res.redirect("/?archiveError=" + encodeURIComponent(error.message));
+        }
     });
 
     return app;

@@ -64,10 +64,17 @@ this environment. Before relying on them:
 
 ## Upload pipeline
 
-Once product.json files exist, `npm run transform` → `npm run review`
-(browser UI at http://localhost:4000) → `npm run upload` turns them into
-campaign-ready payloads sent to your upload API. Full details, field mapping,
-and troubleshooting: see **Part 3** of `USAGE_GUIDE.md`.
+The easiest way to run scrape → review → Mongo export end to end is the
+browser UI: `npm run review`, then open http://localhost:4000 and use the
+**Batch** page — upload your Excel file, start the scrape, and it'll auto-
+transform and take you to review when it's done. See **Part 0** of
+`USAGE_GUIDE.md` for a full walkthrough.
+
+The same pipeline is also scriptable at the CLI: `npm run transform` →
+`npm run review` → `npm run export-mongo` → `npm run mark-uploaded` (once
+you've confirmed the paste into Mongo succeeded) → `npm run archive-batch`
+(to reset for the next batch). Full details, field mapping, and
+troubleshooting: see **Part 3** of `USAGE_GUIDE.md`.
 
 ## Practical/ethical rules (carried over from the plan)
 

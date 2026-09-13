@@ -1,9 +1,82 @@
 # Usage Guide — Running & Extending the Scraper
 
 Companion to `PRODUCT_SCRAPER_PLAN.md` (the design) and `README.md` (quick
-start). This file covers three things in depth: **day-to-day scraper
-operation**, **how to add/fix a website config**, and **the upload pipeline**
-that turns scraped `product.json` files into campaign-ready payloads.
+start). This file covers four things in depth: **the browser-based workflow**
+(the easiest way to run everything), **day-to-day scraper operation** at the
+CLI, **how to add/fix a website config**, and **the upload pipeline** that
+turns scraped `product.json` files into campaign-ready payloads.
+
+---
+
+## Part 0 — The easy way: the Batch & Review web UI
+
+Everything below — scraping, reviewing, and exporting to Mongo — can be done
+from one browser tab, no terminal commands beyond the one that starts it.
+This is the recommended way to run a batch; Parts 1–3 document the same
+pipeline's individual CLI commands for scripting, debugging, or when you
+want more granular control over one step.
+
+### 0.1 Start it
+
+```bash
+npm run review
+```
+
+Open **http://localhost:4000**. Two pages: the **dashboard** (`/`, every
+scraped product, with review/edit tools) and **Batch** (`/batch`, upload +
+scrape). A link between them sits in the header at all times.
+
+### 0.2 Run a batch, start to finish
+
+1. **Go to Batch → upload your Excel file.** Needs a `url` column on the
+   first sheet (see §1.3 for the exact rules) — real hyperlinks, plain-text
+   URLs, and rich-text-split cells all resolve correctly automatically, no
+   pre-formatting needed. The file is saved as `input/products.xlsx`.
+2. **Review the duplicate report.** The page immediately shows the row/URL
+   counts and flags any duplicate URLs (harmless — a duplicate just
+   re-scrapes into the same folder — but worth knowing about). Upload a
+   different file instead if something looks wrong.
+3. **Click "Start scrape."** This runs the real scraper (`src/index.js`,
+   the same one `npm start` runs) as a background process — a real Chromium
+   browser does the actual work, it's just launched and tracked for you. The
+   page shows live status and auto-refreshes every few seconds while it
+   runs; recent console output is shown so you can see what's happening.
+   A **Stop** button is available if you need to cancel — progress already
+   made is safe either way (see §1.7).
+4. **When it finishes**, the transform step (product.json → upload.json)
+   runs **automatically** — no separate `npm run transform` needed. The
+   page tells you how many drafts were created.
+5. **Click "Go to the review dashboard."** Same dashboard documented in
+   §3.2: edit fields per-product, or bulk-apply `program`/`gender`/
+   `categories` to many products at once, and mark them **reviewed**.
+6. **"Export to Mongo" panel** (bottom of the dashboard): pick a site filter
+   (optional) and a format (mongosh-paste `ObjectId(...)` syntax, the
+   default and what this project actually uses day to day, or Extended JSON
+   for `mongoimport`/Compass), then **Generate Mongo import**. You land on a
+   page with the file's content in a copy-ready text box (click it to
+   select-all) plus a **Download file** link. Products already marked
+   `"uploaded"` are excluded automatically — see §3.3 for why that matters.
+7. **Paste it into Mongo.** Atlas's `>_MONGOSH` Data Explorer shell (or a
+   local `mongosh`) as `db.campaigns.insertMany(<paste>)`.
+8. **Click "I pasted this into Mongo — mark N product(s) as uploaded."**
+   Only click this once you've actually confirmed the paste succeeded —
+   there's no way for this tool to verify that from here. This is what
+   keeps the *next* batch's export from re-including products you already
+   sent.
+9. **"Archive & start new batch"** (also on the dashboard): moves every
+   scraped product out of `output/` and resets `state/run.json` into a
+   timestamped `archive/` folder — nothing is deleted, just moved aside —
+   so you can go back to step 1 with a clean workspace. See §3.5 for
+   exactly what this does and doesn't touch.
+
+### 0.3 What the browser flow doesn't (yet) cover
+
+- Editing `.env` settings (concurrency, `MONGODB_URI`, `UPLOAD_API_URL`,
+  etc.) — still a text-editor job, see §1.8.
+- Sending to a REST API (`npm run upload`) or inserting straight through
+  Mongoose (`npm run upload-mongo`) instead of the mongosh-paste flow — CLI
+  only for now, see §3.4/§3.4b.
+- Writing/registering a new site config — see Part 2, still a code change.
 
 ---
 
@@ -46,9 +119,18 @@ Rules:
   `src/configRegistry.js`). Only fill this in when the hostname itself is
   misleading (a regional/whitelabel domain, a shortlink, an A/B test domain)
   and you need to force a specific config. The value must exactly match a
-  config's `name` — currently one of `boat`, `levis`, `hm`, or `books-demo`
-  (the demo/test config) — otherwise it's ignored and auto-detection runs
-  instead.
+  config's `name` — currently one of `boat`, `levis`, `hm`, `shopsy`,
+  `tatacliq`, `wishluck`, `muscleblaze`, or `books-demo` (the demo/test
+  config) — otherwise it's ignored and auto-detection runs instead. Check
+  `src/configRegistry.js` for the current list; it grows as new site configs
+  are added (Part 2).
+- **The `url` cell itself can be a real hyperlink, not just plain text** —
+  paste a link with different display text (e.g. a product name linking to
+  the real URL, from Excel's "Insert Hyperlink" or its own paste-a-URL
+  autocomplete), a plain-text URL, or a URL that got split across multiple
+  rich-text runs (Excel sometimes does this on paste) — all three resolve to
+  the real target URL automatically. No need to "clean up" the sheet into
+  plain text first.
 - **`status`** / **`scrapedAt`** / **`error`** — don't fill these in
   yourself; they get **written by the scraper** after each run (see §1.7)
   and are how you can see progress at a glance by opening the sheet. It's
@@ -139,6 +221,7 @@ logs/YYYY-MM-DD.json      <- one record per URL processed today
 logs/runs/<runId>.json    <- one summary per `npm start` invocation
 screenshots/<website>/    <- full-page screenshot for every failed URL
 input/products.xlsx       <- gets status/scrapedAt/error columns written back after each run
+archive/<timestamp>/      <- a past batch, moved aside by `npm run archive-batch` (§3.5) — not read by anything else
 ```
 
 ### 1.6 Reading `product.json` — the part that matters most
@@ -164,7 +247,7 @@ you exactly which selector to fix.
 - Re-running `npm start` skips any URL already marked `done` in `state/run.json`.
 - Failed URLs are **not** auto-skipped — they're retried on the next run by default.
 - `--force` ignores `state/run.json` entirely and re-scrapes everything in the sheet.
-- Deleting `state/run.json` (or just `rm -rf state`) resets all resumability tracking — do this if you want a truly clean run.
+- Deleting `state/run.json` (or just `rm -rf state`) resets all resumability tracking — do this if you want a truly clean run, or use `npm run archive-batch` (§3.5) to do the same thing without losing the old batch's data.
 - Ctrl+C mid-run closes the browser cleanly and saves whatever state was recorded up to that point; nothing is lost, but the row in progress when you hit Ctrl+C is not marked done.
 
 ### 1.8 Tuning politeness / speed (`.env`)
@@ -395,21 +478,31 @@ localized extension point rather than something to work around by hand.
 
 Turns each scraped `product.json` into a campaign-ready payload, lets you
 review/edit the fields the scraper can't know (program, gender, categories),
-then sends the finished products to the real upload API. Four stages, each
-its own command, each safe to stop and resume:
+then sends the finished products to the real upload API (or straight into
+Mongo). Each stage is its own command, each safe to stop and resume — and
+Part 0's browser UI runs this whole pipeline for you if you'd rather not
+memorize the commands.
 
 ```text
-scrape (Part 1)                already covered above
+scrape (Part 1)                already covered above — Part 0's Batch page also runs this
    │  output/<site>/<slug>/product.json
    ▼
 1. transform   npm run transform        → upload.json draft next to each product.json
-   ▼
+   ▼                                      (Part 0's Batch page runs this automatically after a scrape)
 2. review      npm run review           → http://localhost:4000, edit fields in a browser
    ▼
-3. combine     npm run combine-uploads  → output/combined_uploads.json (optional — one file for everything)
+3. export      npm run export-mongo     → one command: combine + convert to a paste-into-mongosh file (§3.3c)
+   │             (or the two-step npm run combine-uploads + import-to-mongo, §3.3/§3.3b)
    ▼
-4. upload      npm run upload           → POSTs "reviewed" drafts to UPLOAD_API_URL
+   paste into mongosh, THEN:
+   npm run mark-uploaded                → closes the loop so step 3 doesn't re-include these products (§3.3d)
+   ▼
+4. (optional)  npm run archive-batch    → moves this batch out of output/ so the next one starts clean (§3.6)
 ```
+
+The REST-API (`npm run upload`, §3.4) and direct-Mongoose (`npm run
+upload-mongo`, §3.4b) paths are still available as alternatives to the
+combine/export/mark-uploaded flow above — see their own sections.
 
 ### 3.1 Step 1 — transform (`npm run transform`)
 
@@ -478,6 +571,18 @@ Walks every `upload.json` and writes them all into one array file,
 Useful for a manual handoff, a spot-check, or a direct bulk-insert into a
 MongoDB `campaign` collection.
 
+**Drafts already marked `"uploaded"` are excluded automatically** (no flag
+needed) — pass `--include-uploaded` to include them anyway, or `--status=X`
+for the older exact-match behavior (only drafts whose status is exactly
+`X`). This is why §3.3d (`mark-uploaded`) matters: without it, a product
+exported through the mongosh-paste path (§3.3b) never gets marked, so it
+would silently show up in every future combine forever.
+
+Also writes a **manifest** alongside the output —
+`output/combined_uploads.manifest.json`, the `{ site, slug }` of every
+draft that went into this combine. That's what `npm run mark-uploaded`
+(§3.3d) reads.
+
 **By default the output is adapted to match the Mongoose `campaignSchema`**
 (`src/transform/toCampaignDocument.js`) so the file can be fed straight to
 something like `Campaign.insertMany(JSON.parse(fs.readFileSync("combined_uploads.json")))`:
@@ -505,13 +610,14 @@ something like `Campaign.insertMany(JSON.parse(fs.readFileSync("combined_uploads
   document in this combine run.
 
 ```bash
-npm run combine-uploads                            # Mongo-compatible (default)
+npm run combine-uploads                            # Mongo-compatible (default), excludes already-"uploaded" drafts
 node src/combineUploads.js --site=shopsy
-node src/combineUploads.js --status=reviewed        # only products marked "reviewed" (or "uploaded")
+node src/combineUploads.js --status=reviewed        # only products marked exactly "reviewed"
+node src/combineUploads.js --include-uploaded       # include everything, even already-"uploaded" drafts
 node src/combineUploads.js --campaign-status=draft   # set campaignSchema status on every doc
 node src/combineUploads.js --format=raw              # plain upload-schema dump instead (no Mongo adaptation)
 node src/combineUploads.js --format=raw --strip-meta # raw mode only: drop internal _meta bookkeeping
-node src/combineUploads.js --out=output/ready.json
+node src/combineUploads.js --out=output/ready.json   # manifest follows as output/ready.manifest.json
 ```
 
 This step is a convenience — Step 4 (the real uploader) reads `upload.json`
@@ -612,6 +718,54 @@ Mongoose in that path at all). If you want those checks enforced before
 anything is written, use `npm run upload-mongo` (§3.4b) instead, which goes
 through the real model.
 
+### 3.3c One command for Step 3 + §3.3b (`npm run export-mongo`)
+
+Runs `combine-uploads` and the mongosh conversion back to back, in one
+process — no intermediate file re-read, and only one command to remember.
+Writes all three files a full export needs:
+
+```text
+output/combined_uploads.json            (plain-string ids — same as §3.3, for reference / npm run upload-mongo)
+output/combined_uploads.manifest.json   ({ site, slug } of everything included — feed to npm run mark-uploaded)
+output/combined_uploads.atlas.js        (ObjectId("...") shell syntax — paste into mongosh)
+```
+
+```bash
+npm run export-mongo                          # all sites, mongosh format (default)
+node src/exportForMongo.js --site=shopsy
+node src/exportForMongo.js --json             # Extended JSON instead (output/combined_uploads.mongoimport.json)
+node src/exportForMongo.js --include-uploaded
+node src/exportForMongo.js --status=reviewed
+node src/exportForMongo.js --out=output/batch1.json
+```
+
+Same default-exclusion and manifest behavior as §3.3 — this is exactly
+`combine-uploads` + `import-to-mongo` (or `--json` for `to-mongo-import`)
+under the hood, with byte-identical output; use whichever's more convenient.
+
+### 3.3d Closing the loop — `npm run mark-uploaded`
+
+The REST-API uploader (§3.4) and the direct-Mongoose path (§3.4b) both mark
+a product's `upload.json` as `_meta.status = "uploaded"` the moment they
+actually send/insert it. The mongosh-paste path (§3.3b/§3.3c) can't do
+that — it only ever touches the combined JSON file, with no memory of which
+`output/**/upload.json` drafts went into it, and there's no way for this
+tool to verify that a copy-paste into mongosh actually succeeded. This
+script closes that gap as a deliberate, separate, manual step:
+
+```bash
+npm run mark-uploaded                                    # reads output/combined_uploads.manifest.json
+node src/markUploaded.js --manifest=output/other.manifest.json
+node src/markUploaded.js --dry-run                        # preview only, writes nothing
+```
+
+Run it **once you've confirmed** the paste/import actually landed in Mongo
+— not automatically, and not before checking. Once marked, §3.3/§3.3c's
+default exclusion means those products stop showing up in future exports.
+Skip this step and you'll keep re-exporting (and likely re-pasting,
+creating duplicate documents in Mongo) the same batch forever — this is
+the fix for that specific pain point if you've hit it before.
+
 ### 3.4b Alternative to Step 4 — insert straight into MongoDB (`npm run upload-mongo`)
 
 If there's no REST API and products go directly into a MongoDB `campaign`
@@ -658,7 +812,37 @@ upload paths (REST API vs. direct-to-Mongo) never conflict or double-upload
 the same product. Failures are logged to `logs/YYYY-MM-DD.json`
 (`stage: "upload"`) and left safe to retry.
 
-### 3.5 Common problems
+### 3.5 Starting a new batch — `npm run archive-batch`
+
+Once a batch is fully exported (and marked uploaded, §3.3d), `output/` and
+`state/run.json` still have everything from it sitting around — and since
+`combine-uploads`/`export-mongo` scan the *entire* `output/` tree, an old
+batch's already-uploaded products would otherwise just pile up alongside
+new ones (harmless once §3.3d has run, since they're excluded by default,
+but still clutter). This replaces manually deleting `output/`/`state/run.json`
+between batches:
+
+```bash
+npm run archive-batch
+node src/archiveBatch.js --label="September batch 1"     # optional, just recorded in the manifest
+node src/archiveBatch.js --input=input/products.xlsx     # optional, also just recorded
+```
+
+**Moves** (not deletes) everything in `output/` — except `combine.py`/
+`tree.py`, the two hand-written utility scripts that happen to live there,
+never scrape data — plus `state/run.json`, into
+`archive/<timestamp>/`. **Copies** (not moves) today's log file and today's
+run summaries, since other work later that day keeps appending to those.
+Writes a `manifest.json` in the archive folder summarizing what moved.
+Refuses to run (nothing touched) if there's nothing real to archive.
+
+Safe to run any time — `state/run.json` going missing just means
+`src/runState.js` starts fresh from `{}` on the next scrape, exactly like a
+brand-new checkout. Nothing under `archive/` is ever read by any other
+command; it's purely a place to look back at an old batch later if you need
+to.
+
+### 3.6 Common problems
 
 | Symptom | Likely cause / fix |
 |---|---|
@@ -675,3 +859,8 @@ the same product. Failures are logged to `logs/YYYY-MM-DD.json`
 | `EADDRINUSE` starting the review server | A previous `npm run review` is still running in another terminal/background job — find and stop it (`tasklist` / `netstat -ano \| findstr :4000` on Windows) before starting a new one |
 | Mongo `insertMany` rejects a document ("program" required, or a cast error on categories) | `combine-uploads` prints a `!` warning for exactly this at combine time — go back to the review UI and fill in a real ObjectId for `program`/`categories` on the products it flagged, then re-run combine |
 | A product's `gender` is missing from `combined_uploads.json` even though you set it in the review UI | The value didn't map to the schema's enum (`men`/`women`/`kids` only — e.g. "Unisex" has no equivalent) — `combine-uploads` drops it rather than sending an invalid enum value, and prints a warning naming the product |
+| Keep seeing the same already-uploaded products in every new export | You're using the mongosh-paste path (§3.3b/§3.3c) and haven't run `npm run mark-uploaded` (§3.3d) after confirming each paste succeeded — that's the step that stops them being re-included |
+| `npm run mark-uploaded` says "Manifest not found" | Run `npm run combine-uploads` or `npm run export-mongo` first — that's what writes the manifest it reads; or pass `--manifest=` pointing at the right file if you used a custom `--out=` |
+| `npm run archive-batch` says "Nothing to archive" | `output/` has no real product data (only `combine.py`/`tree.py`, if anything) — run a scrape first |
+| Batch page's Excel upload rejects the file | Check the error banner — usually a missing `url` header on the first sheet, or an empty file; §1.3 has the exact column rules |
+| Uploaded a new Excel file on the Batch page but the old products are still on the dashboard | Uploading only replaces `input/products.xlsx` and starts a new scrape — it doesn't touch `output/`. Run `npm run archive-batch` (§3.5) first if you want a clean dashboard for the new batch |

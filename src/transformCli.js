@@ -57,16 +57,26 @@ function* findProductFolders(siteFilter) {
     }
 }
 
-function main() {
-    const args = parseArgs();
-
+/**
+ * Core of this script, factored out so the review server can auto-run it
+ * right after a browser-triggered scrape finishes (Feature 5), instead of
+ * requiring a separate `npm run transform` in a terminal. No console
+ * output here — callers that want progress pass `onProduct(site, slug,
+ * outcome)`, called once per product folder with outcome
+ * `"created" | "skipped" | "failed"`.
+ *
+ * @returns {{ created:number, skipped:number, failed:number, errors: {site:string, slug:string, error:string}[] }}
+ */
+function runTransform(args = {}, { onProduct } = {}) {
     let created = 0;
     let skipped = 0;
     let failed = 0;
+    const errors = [];
 
     for (const { site, slug, folder, productJsonPath, uploadJsonPath } of findProductFolders(args.site)) {
         if (!args.force && fs.existsSync(uploadJsonPath)) {
             skipped++;
+            if (onProduct) onProduct(site, slug, "skipped");
             continue;
         }
 
@@ -90,15 +100,31 @@ function main() {
 
             fs.writeFileSync(uploadJsonPath, JSON.stringify(draft, null, 2), "utf8");
             created++;
-            console.log(`✓ ${site}/${slug}`);
+            if (onProduct) onProduct(site, slug, "created");
         } catch (error) {
             failed++;
-            console.error(`✗ ${site}/${slug}: ${error.message}`);
+            errors.push({ site, slug, error: error.message });
+            if (onProduct) onProduct(site, slug, "failed");
         }
     }
 
-    console.log(`\nDone. created=${created} skipped=${skipped} failed=${failed}`);
-    if (skipped > 0) console.log(`(${skipped} already had an upload.json — pass --force to regenerate)`);
+    return { created, skipped, failed, errors };
 }
 
-main();
+function main() {
+    const args = parseArgs();
+    const result = runTransform(args, {
+        onProduct: (site, slug, outcome) => {
+            if (outcome === "created") console.log(`✓ ${site}/${slug}`);
+        },
+    });
+
+    result.errors.forEach(({ site, slug, error }) => console.error(`✗ ${site}/${slug}: ${error}`));
+
+    console.log(`\nDone. created=${result.created} skipped=${result.skipped} failed=${result.failed}`);
+    if (result.skipped > 0) console.log(`(${result.skipped} already had an upload.json — pass --force to regenerate)`);
+}
+
+if (require.main === module) main();
+
+module.exports = { runTransform };

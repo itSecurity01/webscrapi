@@ -110,6 +110,23 @@ function toShellSyntax(docs) {
     return json.replace(sentinelRe, 'ObjectId("$1")');
 }
 
+/**
+ * Core of this script, factored out so src/exportForMongo.js can convert an
+ * already-in-memory document array (e.g. straight from
+ * combineUploads.js's buildCombinedDocuments()) without round-tripping it
+ * through a file first. Pure — no file I/O, nothing printed.
+ *
+ * @param {object[]} docs
+ * @param {{ shell?: boolean }} [options]
+ * @returns {{ converted: object[], warnings: string[], fileContents: string }}
+ */
+function convertForMongoImport(docs, { shell = false } = {}) {
+    const warnings = [];
+    const converted = docs.map((doc, i) => convertDocument(doc, doc.name || `document #${i + 1}`, warnings, shell));
+    const fileContents = shell ? toShellSyntax(converted) : JSON.stringify(converted, null, 2);
+    return { converted, warnings, fileContents };
+}
+
 function main() {
     const args = parseArgs();
     const inFile = path.resolve(process.cwd(), args.file);
@@ -123,10 +140,7 @@ function main() {
         process.exit(1);
     }
 
-    const warnings = [];
-    const converted = docs.map((doc, i) => convertDocument(doc, doc.name || `document #${i + 1}`, warnings, args.shell));
-
-    const fileContents = args.shell ? toShellSyntax(converted) : JSON.stringify(converted, null, 2);
+    const { converted, warnings, fileContents } = convertForMongoImport(docs, { shell: args.shell });
     fs.writeFileSync(outFile, fileContents, "utf8");
 
     console.log(`Converted ${converted.length} document(s) from ${inFile}`);
@@ -140,4 +154,6 @@ function main() {
         : `Import with: mongoimport --uri="<connection string>" --collection=campaigns --jsonArray --file="${outFile}"`);
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { convertForMongoImport };
