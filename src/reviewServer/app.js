@@ -11,6 +11,7 @@ const { productView } = require("./views/productView");
 const { batchView } = require("./views/batchView");
 const { exportResultView } = require("./views/exportResultView");
 const { readExcel } = require("../excelReader");
+const { inspectWorkbook, collectRows, writeInputWorkbook } = require("../excelNormalizer");
 const { findDuplicates } = require("../checkDuplicates");
 const { RunState } = require("../runState");
 const { exportForMongo } = require("../exportForMongo");
@@ -19,7 +20,17 @@ const { archiveBatch } = require("../archiveBatch");
 
 const PROJECT_ROOT = path.join(__dirname, "..", "..");
 const INPUT_XLSX_PATH = path.join(PROJECT_ROOT, "input", "products.xlsx");
+// The workbook exactly as uploaded — kept so the user can go back and pick a
+// different sheet without re-uploading. input/products.xlsx is generated from it.
+const SOURCE_XLSX_PATH = path.join(PROJECT_ROOT, "input", "source.xlsx");
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+
+/** Turns a user-typed download name into a safe "<name><ext>" filename. */
+function downloadName(raw, fallback, ext) {
+    let name = String(raw || "").trim().replace(/[\\/:*?"<>|]+/g, "").replace(/\s+/g, " ");
+    if (name.toLowerCase().endsWith(ext)) name = name.slice(0, -ext.length);
+    return `${name || fallback}${ext}`;
+}
 
 function splitList(raw) {
     return String(raw || "")
@@ -159,36 +170,112 @@ function createApp() {
                 ? { type: "error", text: req.query.startError }
                 : null;
 
-        res.send(batchView({ status, pendingUpload: scrapeRunner.getPendingUpload(), runSummary, notice }));
+        res.send(batchView({
+            status,
+            pendingSource: scrapeRunner.getPendingSource(),
+            pendingUpload: scrapeRunner.getPendingUpload(),
+            runSummary,
+            notice,
+        }));
     });
 
+    // Step 1: stash the raw workbook and list its sheets. The file the user
+    // hands over is rarely already in url/website/status shape (it's usually
+    // a per-category workbook with URLs scattered across columns), so
+    // nothing is written to input/products.xlsx yet — that happens in
+    // /batch/build once they've picked which sheet(s) to use.
     app.post("/batch/upload", upload.single("excel"), async (req, res) => {
         if (!req.file) {
             return res.redirect("/batch?uploadError=" + encodeURIComponent("No file was received — pick a .xlsx file first."));
         }
 
         try {
-            fs.mkdirSync(path.dirname(INPUT_XLSX_PATH), { recursive: true });
-            fs.writeFileSync(INPUT_XLSX_PATH, req.file.buffer);
+            fs.mkdirSync(path.dirname(SOURCE_XLSX_PATH), { recursive: true });
+            fs.writeFileSync(SOURCE_XLSX_PATH, req.file.buffer);
 
-            const rows = await readExcel(INPUT_XLSX_PATH);
-            if (rows.length === 0) {
-                return res.redirect("/batch?uploadError=" + encodeURIComponent('No usable rows found — check the "url" column has values.'));
+            const sheets = await inspectWorkbook(SOURCE_XLSX_PATH);
+            const totalUrls = sheets.reduce((sum, s) => sum + s.urlCount, 0);
+            if (totalUrls === 0) {
+                return res.redirect("/batch?uploadError=" + encodeURIComponent("No URLs found on any sheet — nothing that looks like a product link (https://... or domain.com/...) in the file."));
             }
 
-            const { totalRows, distinctUrls, dupes, dupeRowCount } = findDuplicates(rows);
-            scrapeRunner.setPendingUpload({
-                inputPath: "input/products.xlsx",
-                totalRows,
-                distinctUrls,
-                dupes,
-                dupeRowCount,
+            scrapeRunner.setPendingSource({
+                sourcePath: "input/source.xlsx",
+                originalName: req.file.originalname,
+                sheets,
             });
+
+            // Only one sheet — nothing to choose, build the input file straight away.
+            if (sheets.length === 1) {
+                await buildInputFromSource([sheets[0].name]);
+            }
+            res.redirect("/batch");
+        } catch (error) {
+            scrapeRunner.clearPendingSource();
+            res.redirect("/batch?uploadError=" + encodeURIComponent(error.message));
+        }
+    });
+
+    // Step 2: pick sheet(s) -> generate input/products.xlsx (url | website | status).
+    app.post("/batch/build", async (req, res) => {
+        if (!scrapeRunner.getPendingSource()) {
+            return res.redirect("/batch?uploadError=" + encodeURIComponent("Nothing to build — upload a file first."));
+        }
+
+        const picked = [].concat(req.body.sheets || []).filter(Boolean);
+        if (picked.length === 0) {
+            return res.redirect("/batch?uploadError=" + encodeURIComponent("Pick at least one sheet."));
+        }
+
+        try {
+            await buildInputFromSource(picked);
             res.redirect("/batch");
         } catch (error) {
             res.redirect("/batch?uploadError=" + encodeURIComponent(error.message));
         }
     });
+
+    // Back to the sheet picker without re-uploading (e.g. picked the wrong tab).
+    app.post("/batch/repick", (req, res) => {
+        scrapeRunner.clearPendingUpload();
+        res.redirect("/batch");
+    });
+
+    app.post("/batch/discard", (req, res) => {
+        scrapeRunner.clearPendingUpload();
+        scrapeRunner.clearPendingSource();
+        res.redirect("/batch");
+    });
+
+    // The generated url/website/status file, saved under whatever name the
+    // user typed in the browser prompt (see batchView).
+    app.get("/batch/input-download", (req, res) => {
+        if (!fs.existsSync(INPUT_XLSX_PATH)) return res.status(404).send("No input file generated yet.");
+        res.download(INPUT_XLSX_PATH, downloadName(req.query.name, "products", ".xlsx"));
+    });
+
+    async function buildInputFromSource(sheetNames) {
+        const { rows, perSheet, duplicatesDropped } = await collectRows(SOURCE_XLSX_PATH, sheetNames);
+        if (rows.length === 0) {
+            throw new Error(`No URLs found on ${sheetNames.map(n => `"${n}"`).join(", ")}.`);
+        }
+
+        await writeInputWorkbook(rows, INPUT_XLSX_PATH);
+
+        // Re-read through the scraper's own reader so the numbers shown are
+        // exactly what src/index.js will see.
+        const readBack = await readExcel(INPUT_XLSX_PATH);
+        const { totalRows, distinctUrls, dupes, dupeRowCount } = findDuplicates(readBack);
+        scrapeRunner.setPendingUpload({
+            inputPath: "input/products.xlsx",
+            totalRows,
+            distinctUrls,
+            dupes,
+            dupeRowCount,
+            sourceSheets: perSheet,
+            duplicatesDropped,
+        });
+    }
 
     app.post("/batch/start", (req, res) => {
         const pending = scrapeRunner.getPendingUpload();
@@ -248,7 +335,9 @@ function createApp() {
     app.get("/export-mongo/download", (req, res) => {
         const lastExport = pipelineState.getLastExport();
         if (!lastExport || !fs.existsSync(lastExport.mongoFile)) return res.status(404).send("No export available — generate one first.");
-        res.download(lastExport.mongoFile);
+        const ext = path.extname(lastExport.mongoFile);
+        const fallback = path.basename(lastExport.mongoFile, ext);
+        res.download(lastExport.mongoFile, downloadName(req.query.name, fallback, ext));
     });
 
     app.post("/mark-uploaded", (req, res) => {

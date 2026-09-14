@@ -27,6 +27,14 @@ function cellToText(value) {
         if (typeof value.hyperlink === "string") return value.hyperlink; // real hyperlink (or HYPERLINK() formula) — the actual target, not the display text
         if (typeof value.text === "string") return value.text; // hyperlink-shaped value with no separate target (rare) — falls back to its text
         if (Array.isArray(value.richText)) return value.richText.map(run => run.text || "").join(""); // rich text runs
+        if (typeof value.formula === "string") {
+            // =HYPERLINK("https://...", "Buy Now") — Excel stores no hyperlink
+            // relationship for these, so the real target only exists inside the
+            // formula text; the cached result is just the display label.
+            const m = value.formula.match(/HYPERLINK\(\s*"([^"]+)"/i);
+            if (m) return m[1];
+        }
+        if (value.result != null) return cellToText(value.result); // formula cell — use its cached result (may itself be a hyperlink/rich-text shape)
     }
     return null;
 }
@@ -96,4 +104,4 @@ async function readExcel(filePath) {
     return rows;
 }
 
-module.exports = { readExcel, resolveUrlCell };
+module.exports = { readExcel, resolveUrlCell, cellToText, normalizeScheme };

@@ -6,3 +6,6 @@ screenshots/
 state/
 archive/
 .env
+
+# raw workbook as uploaded on the Batch page (input/products.xlsx is generated from it)
+input/source.xlsx

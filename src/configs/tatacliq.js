@@ -64,7 +64,7 @@ module.exports = {
         await page
             .waitForSelector(
                 [".ProductDetailsMainCard__productName", ".ProductGalleryDesktopUpdated__images"].join(", "),
-                { timeout: 15000, state: "visible" }
+                { timeout: 20000, state: "visible" }
             )
             .catch(() => {});
 
