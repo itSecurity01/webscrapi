@@ -6,6 +6,19 @@ const tatacliq = require("./configs/tatacliq");
 const wishluck = require("./configs/wishluck");
 const muscleblaze = require("./configs/muscleblaze");
 const booksToScrapeDemo = require("./configs/booksToScrapeDemo");
+const hamaramall = require("./configs/hamaramall");
+const asus = require("./configs/asus");
+const acer = require("./configs/acer");
+const oppo = require("./configs/oppo");
+const nykaafashion = require("./configs/nykaafashion");
+const moglix = require("./configs/moglix");
+const milton = require("./configs/milton");
+const lenovo = require("./configs/lenovo");
+const dotandkey = require("./configs/dotandkey");
+const controlz = require("./configs/controlz");
+const sangeetha = require("./configs/sangeetha");
+const digihaat = require("./configs/digihaat");
+const plumgoodness = require("./configs/plumgoodness");
 
 // Adding a new website = one new config file + one new entry here.
 // Nothing in domainRouter.js or scraper.js should ever need to change.
@@ -18,4 +31,17 @@ module.exports = [
     { test: (hostname) => hostname.includes("wishluck"), config: wishluck },
     { test: (hostname) => hostname.includes("muscleblaze"), config: muscleblaze },
     { test: (hostname) => hostname.includes("books.toscrape.com"), config: booksToScrapeDemo },
+    { test: (hostname) => hostname.includes("hamaramall"), config: hamaramall },
+    { test: (hostname) => hostname.includes("asus"), config: asus },
+    { test: (hostname) => hostname.includes("acer.com"), config: acer },
+    { test: (hostname) => hostname.includes("oppo.com"), config: oppo },
+    { test: (hostname) => hostname.includes("nykaafashion"), config: nykaafashion },
+    { test: (hostname) => hostname.includes("moglix"), config: moglix },
+    { test: (hostname) => hostname.includes("milton.in"), config: milton },
+    { test: (hostname) => hostname.includes("lenovo.com"), config: lenovo },
+    { test: (hostname) => hostname.includes("dotandkey.com"), config: dotandkey },
+    { test: (hostname) => hostname.includes("controlz.world"), config: controlz },
+    { test: (hostname) => hostname.includes("sangeetha.com"), config: sangeetha },
+    { test: (hostname) => hostname.includes("digihaat.in"), config: digihaat },
+    { test: (hostname) => hostname.includes("plumgoodness.com"), config: plumgoodness },
 ];

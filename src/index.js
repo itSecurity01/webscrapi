@@ -127,7 +127,10 @@ async function main() {
     const rateLimiter = new DomainRateLimiter({ delayMs: DOMAIN_DELAY_MS, jitterMs: DOMAIN_DELAY_JITTER_MS });
     const excelResults = new Map();
 
-    const browser = await chromium.launch({ headless: !args.headed });
+    const browser = await chromium.launch({
+    headless: !args.headed,
+    channel: "chrome"
+});
     const context = await browser.newContext();
 
     let shuttingDown = false;
