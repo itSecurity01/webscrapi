@@ -24,6 +24,10 @@ const firstcry = require("./configs/firstcry");
 const namakwali = require("./configs/namakwali");
 const nykaa = require("./configs/nykaa");
 const adventuras = require('./configs/adventuras')
+const letstryfoods = require("./configs/letstryfoods");
+const floweraura = require("./configs/floweraura");
+const hyugalife = require("./configs/hyugalife");
+const agaro = require("./configs/agaro");
 
 // Adding a new website = one new config file + one new entry here.
 // Nothing in domainRouter.js or scraper.js should ever need to change.
@@ -58,4 +62,8 @@ module.exports = [
     // the first match) is what keeps that site on its own config instead
     // of falling into this one.
     { test: (hostname) => hostname.includes("nykaa"), config: nykaa },
+    { test: (hostname) => hostname.includes("letstryfoods.com"), config: letstryfoods },
+    { test: (hostname) => hostname.includes("floweraura.com"), config: floweraura },
+    { test: (hostname) => hostname.includes("hyugalife.com"), config: hyugalife },
+    { test: (hostname) => hostname.includes("agarolifestyle.com"), config: agaro },
 ];
