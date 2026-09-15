@@ -23,8 +23,24 @@ const PROJECT_ROOT = path.join(__dirname, "..", "..");
 const INDEX_JS = path.join(__dirname, "..", "index.js");
 const MAX_LOG_LINES = 500;
 
-let pendingUpload = null; // { inputPath, totalRows, distinctUrls, dupes, dupeRowCount, uploadedAt }
+// The raw workbook the user uploaded, waiting for them to pick which
+// sheet(s) to turn into input/products.xlsx (see excelNormalizer.js).
+let pendingSource = null; // { sourcePath, originalName, sheets: [{ name, urlCount, hasUrlHeader }], uploadedAt }
+let pendingUpload = null; // { inputPath, totalRows, distinctUrls, dupes, dupeRowCount, sourceSheets, duplicatesDropped, uploadedAt }
 let job = null; // { process, inputPath, startedAt, exitedAt, exitCode, error, log: string[] }
+
+function setPendingSource(info) {
+    pendingSource = { ...info, uploadedAt: new Date().toISOString() };
+    return pendingSource;
+}
+
+function getPendingSource() {
+    return pendingSource;
+}
+
+function clearPendingSource() {
+    pendingSource = null;
+}
 
 function setPendingUpload(info) {
     pendingUpload = { ...info, uploadedAt: new Date().toISOString() };
@@ -176,4 +192,8 @@ function getStatus() {
     return { state: "done", ...base };
 }
 
-module.exports = { setPendingUpload, getPendingUpload, clearPendingUpload, startScrape, stopScrape, clearJob, discardJob, getStatus, isRunning };
+module.exports = {
+    setPendingSource, getPendingSource, clearPendingSource,
+    setPendingUpload, getPendingUpload, clearPendingUpload,
+    startScrape, stopScrape, clearJob, discardJob, getStatus, isRunning,
+};

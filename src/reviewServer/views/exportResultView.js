@@ -1,5 +1,6 @@
 const path = require("path");
 const { layout, esc } = require("./layout");
+const { promptedDownload } = require("./batchView");
 
 function exportResultView(lastExport, fileContents) {
     if (!lastExport) {
@@ -12,7 +13,7 @@ function exportResultView(lastExport, fileContents) {
     }
 
     const { productCount, manifestCount, excludedUploaded, warnings, generatedAt, manifestFile, mongoFile } = lastExport;
-    const suggestedName = path.basename(mongoFile);
+    const defaultName = path.basename(mongoFile, path.extname(mongoFile));
 
     const warningsHtml = warnings && warnings.length > 0
         ? `<div class="panel" style="background:#fef3c7; color:#92400e;">
@@ -34,7 +35,7 @@ function exportResultView(lastExport, fileContents) {
         <p class="muted" style="margin-top:-6px;">Atlas Data Explorer's "&gt;_MONGOSH" shell (or a local <code>mongosh</code>) as <code>db.campaigns.insertMany(&lt;paste this&gt;)</code>.</p>
         <textarea readonly style="min-height:320px; font-family: ui-monospace, Consolas, monospace; font-size:12.5px;" onclick="this.select()">${esc(fileContents)}</textarea>
         <div style="margin-top:12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-          <button type="button" class="secondary" onclick="downloadWithName(${esc(JSON.stringify(suggestedName))})">⬇️ Download file</button>
+          <a class="btn secondary" href="/export-mongo/download" onclick="${esc(promptedDownload("/export-mongo/download", defaultName))}">⬇️ Download file</a>
           <form method="post" action="/mark-uploaded" onsubmit="return confirm('Only confirm this once you\\'ve actually pasted/imported the file above into Mongo successfully. This marks ${manifestCount} product(s) so they won\\'t be re-exported next time.');" style="margin:0;">
             <button type="submit">✅ I pasted this into Mongo — mark ${manifestCount} product(s) as uploaded</button>
           </form>
@@ -42,19 +43,13 @@ function exportResultView(lastExport, fileContents) {
         <p class="muted" style="margin-top:10px;">Manifest: <code>${esc(manifestFile)}</code></p>
       </div>
 
-      <script>
-        function downloadWithName(suggested) {
-          var validExts = ['txt', 'json', 'js', 'ts'];
-          var name = prompt('Save as (a .js extension is added automatically if you leave one off):', suggested);
-          if (name === null) return; // cancelled
-          name = name.trim();
-          if (!name) return;
-          var match = name.match(/\\.([a-zA-Z0-9]+)$/);
-          var hasValidExt = match && validExts.indexOf(match[1].toLowerCase()) !== -1;
-          if (!hasValidExt) name += '.js';
-          window.location.href = '/export-mongo/download?filename=' + encodeURIComponent(name);
-        }
-      </script>`;
+      <div class="panel">
+        <h2>Archive this batch</h2>
+        <p class="muted" style="margin-top:-6px;">Once the file above is in Mongo (and marked as uploaded), move every scraped product out of <code>output/</code> into a timestamped <code>archive/</code> folder — nothing is deleted, just moved aside — so the next Excel file starts from a clean workspace.</p>
+        <form method="post" action="/archive-batch" onsubmit="return confirm('Archive all ${productCount} product(s) and clear the workspace for a new batch? Nothing is deleted \\u2014 it all moves into archive/.');">
+          <button type="submit" class="secondary">Archive &amp; start new batch</button>
+        </form>
+      </div>`;
 
     return layout("Export to Mongo", body);
 }
