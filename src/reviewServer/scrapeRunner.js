@@ -17,6 +17,7 @@
 const { spawn } = require("child_process");
 const path = require("path");
 const { runTransform } = require("../transformCli");
+const { archiveBatch } = require("../archiveBatch");
 
 const PROJECT_ROOT = path.join(__dirname, "..", "..");
 const INDEX_JS = path.join(__dirname, "..", "index.js");
@@ -42,14 +43,18 @@ function isRunning() {
     return !!(job && job.exitCode === undefined && job.exitedAt === null);
 }
 
-/** @param {{ inputPath: string }} options - inputPath is resolved (absolute) or cwd-relative to PROJECT_ROOT */
-function startScrape({ inputPath }) {
+/** @param {{ inputPath: string, headed?: boolean }} options - inputPath is resolved (absolute) or cwd-relative to
+ * PROJECT_ROOT; headed launches the scraper's browser visibly instead of headless (useful for watching/debugging
+ * a run from the Batch page). */
+function startScrape({ inputPath, headed = false }) {
     if (isRunning()) {
         throw new Error("A scrape is already running — wait for it to finish (or stop it) before starting another.");
     }
 
     const relativeInput = path.isAbsolute(inputPath) ? path.relative(PROJECT_ROOT, inputPath) : inputPath;
-    const child = spawn(process.execPath, [INDEX_JS, `--input=${relativeInput}`], {
+    const cliArgs = [INDEX_JS, `--input=${relativeInput}`];
+    if (headed) cliArgs.push("--headed");
+    const child = spawn(process.execPath, cliArgs, {
         cwd: PROJECT_ROOT,
         env: process.env,
     });
@@ -57,6 +62,7 @@ function startScrape({ inputPath }) {
     job = {
         process: child,
         inputPath: relativeInput,
+        headed,
         startedAt: new Date().toISOString(),
         exitedAt: null,
         exitCode: undefined,
@@ -121,11 +127,42 @@ function clearJob() {
     job = null;
 }
 
+/**
+ * For a test/throwaway run: clearJob() alone only resets what the Batch
+ * page *shows* — it leaves state/run.json marking those URLs "done" and
+ * their scraped files sitting in output/, so a later real run over
+ * overlapping URLs would silently skip them as already-done. This instead
+ * archives that run's state/run.json + output/ data aside (the same
+ * move-not-delete archiveBatch() the dashboard's "Archive this batch"
+ * button already uses) before clearing the job, so the test run stops
+ * counting against future runs. Nothing is deleted — it all lands in
+ * archive/<timestamp>/, same as a normal archive.
+ * Refuses while a scrape is running (stop it first).
+ */
+function discardJob() {
+    if (isRunning()) throw new Error("A scrape is still running — stop it first.");
+    if (!job) throw new Error("Nothing to discard.");
+
+    let archived = null;
+    try {
+        archived = archiveBatch({ input: job.inputPath, label: "Discarded test run (Batch page)" });
+    } catch (error) {
+        // "Nothing to archive" (e.g. the run failed before producing any
+        // output) isn't a real failure here — there's just nothing to move
+        // aside, so fall through and clear the job anyway.
+        if (!/Nothing to archive/.test(error.message)) throw error;
+    }
+
+    clearJob();
+    return archived;
+}
+
 function getStatus() {
     if (!job) return { state: "idle" };
 
     const base = {
         inputPath: job.inputPath,
+        headed: job.headed,
         startedAt: job.startedAt,
         exitedAt: job.exitedAt,
         exitCode: job.exitCode,
@@ -139,4 +176,4 @@ function getStatus() {
     return { state: "done", ...base };
 }
 
-module.exports = { setPendingUpload, getPendingUpload, clearPendingUpload, startScrape, stopScrape, clearJob, getStatus, isRunning };
+module.exports = { setPendingUpload, getPendingUpload, clearPendingUpload, startScrape, stopScrape, clearJob, discardJob, getStatus, isRunning };

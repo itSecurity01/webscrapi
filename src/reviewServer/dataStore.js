@@ -102,6 +102,29 @@ function bulkUpdate(items, updates, { status } = {}) {
 }
 
 /**
+ * Permanently deletes a product's entire output folder (product.json,
+ * upload.json, downloaded images, screenshot). Used from the review
+ * dashboard to drop products the source site has since delisted — the
+ * scraper has no way to know a URL went dead, so this is the manual escape
+ * hatch. Returns false (no-op) if the folder was already gone.
+ */
+function deleteDraft(site, slug) {
+    const folder = folderPath(site, slug);
+
+    // site/slug come straight from URL params — guard against a crafted
+    // "../.." segment walking the delete outside output/, same check the
+    // /media route already applies to read paths.
+    const relative = path.relative(OUTPUT_DIR, folder);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+        throw new Error("Invalid site/slug");
+    }
+
+    if (!fs.existsSync(folder)) return false;
+    fs.rmSync(folder, { recursive: true, force: true });
+    return true;
+}
+
+/**
  * Preview image URLs for a product: local files served through /media if
  * they were downloaded, otherwise the remote CDN URLs stored on the draft
  * itself (e.g. when the scrape ran with --skip-images).
@@ -123,6 +146,7 @@ module.exports = {
     listLocalImages,
     updateDraft,
     bulkUpdate,
+    deleteDraft,
     folderPath,
     resolveImageUrls,
 };

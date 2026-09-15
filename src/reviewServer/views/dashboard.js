@@ -1,4 +1,4 @@
-const { layout, esc } = require("./layout");
+const { layout, esc, jsAttr } = require("./layout");
 
 function statusBadge(status) {
     return `<span class="status status-${esc(status)}">${esc(status)}</span>`;
@@ -8,6 +8,9 @@ function row(draft, thumbUrl) {
     const meta = draft._meta;
     const key = `${meta.site}::${meta.slug}`;
     const editHref = `/product/${encodeURIComponent(meta.site)}/${encodeURIComponent(meta.slug)}`;
+    const deleteAction = `${editHref}/delete`;
+    const sourceUrl = meta.sourceUrl || "";
+    const confirmMsg = `Delete “${jsAttr(draft.name)}”? This permanently removes its scraped data (images, product.json, upload.json) from output/. This cannot be undone.`;
 
     return `
     <tr>
@@ -20,7 +23,13 @@ function row(draft, thumbUrl) {
       <td>${esc(draft.gender) || "<span class=\"muted\">—</span>"}</td>
       <td>${draft.categories && draft.categories.length ? esc(draft.categories.join(", ")) : "<span class=\"muted\">—</span>"}</td>
       <td>${statusBadge(meta.status)}</td>
-      <td><a class="btn secondary" href="${editHref}">Edit</a></td>
+      <td class="actions-cell">
+        ${sourceUrl ? `<a class="icon-btn" href="${esc(sourceUrl)}" target="_blank" rel="noopener" title="View original product page">👁️</a>` : ""}
+        <a class="icon-btn" href="${editHref}" title="Edit">✏️</a>
+        <form method="post" action="${deleteAction}" style="display:inline;" onsubmit="return confirm('${confirmMsg}');">
+          <button type="submit" class="icon-btn danger" title="Delete this product">🗑️</button>
+        </form>
+      </td>
     </tr>`;
 }
 
@@ -31,7 +40,7 @@ function exportPanel(lastArchive, draftCount) {
 
     return `
       <div class="panel">
-        <h2>Export to Mongo</h2>
+        <h2>📤 Export to Mongo</h2>
         <p class="muted" style="margin-top:-6px;">Combines every reviewed draft, converts <code>program</code>/<code>categories</code>/<code>userId</code> to real ObjectIds, and gives you a paste-into-mongosh file. Drafts already marked "uploaded" are skipped automatically.</p>
         <form method="post" action="/export-mongo">
           <div class="row">
@@ -52,16 +61,16 @@ function exportPanel(lastArchive, draftCount) {
             Include already-"uploaded" drafts too
           </label>
           <div style="margin-top:14px;">
-            <button type="submit">Generate Mongo import</button>
+            <button type="submit">📤 Generate Mongo import</button>
           </div>
         </form>
       </div>
       <div class="panel">
-        <h2>Archive this batch</h2>
+        <h2>🗄️ Archive this batch</h2>
         <p class="muted" style="margin-top:-6px;">Moves every scraped product out of <code>output/</code> (and resets <code>state/run.json</code>) into a timestamped <code>archive/</code> folder — nothing is deleted, just moved aside — so the next Excel file starts from a clean workspace.</p>
         ${archiveNote}
         <form method="post" action="/archive-batch" onsubmit="return confirm('Archive all ${draftCount} product(s) and clear the workspace for a new batch? Nothing is deleted \\u2014 it all moves into archive/.');">
-          <button type="submit" class="secondary">Archive &amp; start new batch</button>
+          <button type="submit" class="secondary">🗄️ Archive &amp; start new batch</button>
         </form>
       </div>`;
 }
@@ -88,7 +97,7 @@ function dashboardView(drafts, resolveThumb, notice, lastArchive) {
     const body = `
       ${noticeHtml}
       <div class="panel">
-        <h2>Bulk-apply to selected</h2>
+        <h2>📝 Bulk-apply to selected</h2>
         <p class="muted" style="margin-top:-6px;">1. Tick the checkbox next to each product in the table below &nbsp;→&nbsp; 2. Fill in the field(s) to change &nbsp;→&nbsp; 3. Apply.</p>
         <form id="bulk-form" method="post" action="/bulk-apply" onsubmit="return validateBulkForm(this)">
           <div class="row">
@@ -110,7 +119,7 @@ function dashboardView(drafts, resolveThumb, notice, lastArchive) {
             Mark selected products as "reviewed" (ready to upload)
           </label>
           <div style="margin-top:14px; display:flex; align-items:center; gap:12px;">
-            <button type="submit">Apply to selected</button>
+            <button type="submit">✅ Apply to selected</button>
             <span id="selected-count" class="muted">0 selected</span>
           </div>
         </form>
@@ -136,7 +145,17 @@ function dashboardView(drafts, resolveThumb, notice, lastArchive) {
         </table>
       </div>
 
-      ${exportPanel(lastArchive, drafts.length)}
+      <button type="button" class="fab" onclick="document.getElementById('exportModal').classList.add('open')" title="Export to Mongo, or archive this batch">📦 Export &amp; Archive</button>
+
+      <div id="exportModal" class="modal-backdrop" onclick="if (event.target === this) this.classList.remove('open')">
+        <div class="modal-box">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <h2 style="margin:0;">📦 Export &amp; Archive</h2>
+            <button type="button" class="secondary" onclick="document.getElementById('exportModal').classList.remove('open')">✕ Close</button>
+          </div>
+          ${exportPanel(lastArchive, drafts.length)}
+        </div>
+      </div>
 
       <script>
         function updateSelectedCount() {
@@ -156,6 +175,10 @@ function dashboardView(drafts, resolveThumb, notice, lastArchive) {
           }
           return true;
         }
+
+        document.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape') document.getElementById('exportModal').classList.remove('open');
+        });
       </script>`;
 
     return layout("Upload Review", body);

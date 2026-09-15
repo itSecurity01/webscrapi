@@ -75,7 +75,11 @@ function createApp() {
                             ? { type: "ok", text: `Archived ${req.query.archived} product(s) — workspace is clean for the next batch.` }
                             : req.query.archiveError
                                 ? { type: "error", text: req.query.archiveError }
-                                : null;
+                                : req.query.deleted
+                                    ? { type: "ok", text: "Product deleted." }
+                                    : req.query.deleteError
+                                        ? { type: "error", text: req.query.deleteError }
+                                        : null;
         res.send(dashboardView(drafts, resolveThumb, notice, pipelineState.getLastArchive()));
     });
 
@@ -121,6 +125,19 @@ function createApp() {
         }
     });
 
+    // Drops a product's entire output/<site>/<slug> folder — for when the
+    // source site has delisted/removed the product but a stale scrape of it
+    // is still sitting in the review queue.
+    app.post("/product/:site/:slug/delete", (req, res) => {
+        const { site, slug } = req.params;
+        try {
+            const removed = store.deleteDraft(site, slug);
+            res.redirect(removed ? "/?deleted=1" : "/?deleteError=" + encodeURIComponent("Already gone — nothing to delete."));
+        } catch (error) {
+            res.redirect("/?deleteError=" + encodeURIComponent(error.message));
+        }
+    });
+
     app.post("/bulk-apply", (req, res) => {
         const body = req.body;
         const selected = [].concat(body.selected || []).filter(Boolean);
@@ -157,7 +174,11 @@ function createApp() {
             ? { type: "error", text: req.query.uploadError }
             : req.query.startError
                 ? { type: "error", text: req.query.startError }
-                : null;
+                : req.query.discarded
+                    ? { type: "ok", text: `Discarded — ${req.query.discarded} product(s)' worth of state/output moved into archive/. Those URLs are free to be re-scraped.` }
+                    : req.query.discardError
+                        ? { type: "error", text: req.query.discardError }
+                        : null;
 
         res.send(batchView({ status, pendingUpload: scrapeRunner.getPendingUpload(), runSummary, notice }));
     });
@@ -190,6 +211,11 @@ function createApp() {
         }
     });
 
+    app.post("/batch/upload-reset", (req, res) => {
+        scrapeRunner.clearPendingUpload();
+        res.redirect("/batch");
+    });
+
     app.post("/batch/start", (req, res) => {
         const pending = scrapeRunner.getPendingUpload();
         if (!pending) {
@@ -197,7 +223,7 @@ function createApp() {
         }
 
         try {
-            scrapeRunner.startScrape({ inputPath: pending.inputPath });
+            scrapeRunner.startScrape({ inputPath: pending.inputPath, headed: req.body.headed === "on" });
             res.redirect("/batch");
         } catch (error) {
             res.redirect("/batch?startError=" + encodeURIComponent(error.message));
@@ -216,6 +242,18 @@ function createApp() {
             // still running — ignore, /batch will just show the running state again
         }
         res.redirect("/batch");
+    });
+
+    // Discards a finished test run: archives its state/run.json + output/
+    // data aside (nothing deleted) and clears the job, so those URLs stop
+    // being remembered as "already done" for a future real run.
+    app.post("/batch/discard", (req, res) => {
+        try {
+            const archived = scrapeRunner.discardJob();
+            res.redirect("/batch?discarded=" + (archived ? archived.productCount : 0));
+        } catch (error) {
+            res.redirect("/batch?discardError=" + encodeURIComponent(error.message));
+        }
     });
 
     // --- Export to Mongo / mark uploaded / archive (Feature 5c/5d/5e) ---
@@ -248,7 +286,13 @@ function createApp() {
     app.get("/export-mongo/download", (req, res) => {
         const lastExport = pipelineState.getLastExport();
         if (!lastExport || !fs.existsSync(lastExport.mongoFile)) return res.status(404).send("No export available — generate one first.");
-        res.download(lastExport.mongoFile);
+        // ?filename= comes from the "Download file" button's save-as prompt
+        // (see exportResultView.js) — it only renames what the browser saves
+        // the file as (Content-Disposition), never which file is read from
+        // disk, but path.basename() still strips any directory segments
+        // before it reaches that header.
+        const requestedName = req.query.filename ? path.basename(String(req.query.filename)) : undefined;
+        res.download(lastExport.mongoFile, requestedName);
     });
 
     app.post("/mark-uploaded", (req, res) => {

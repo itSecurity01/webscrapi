@@ -6,6 +6,27 @@ function esc(value) {
         .replace(/"/g, "&quot;");
 }
 
+/**
+ * Escapes a value for safe embedding inside a single-quoted JS string
+ * literal that itself sits inside an HTML attribute, e.g.
+ * `onsubmit="return confirm('Delete ${jsAttr(name)}?')"`. Apply this
+ * instead of esc() whenever the interpolated value (a product name, in
+ * practice) isn't a value you control — a stray apostrophe in it would
+ * otherwise terminate the confirm('...') string early and, since a thrown
+ * JS error in an onsubmit handler doesn't stop the form submitting, that
+ * silently skips the confirmation entirely.
+ * Escape order matters: JS-escape first (so the browser's JS parser sees a
+ * literal quote/backslash), then esc() the result (so the browser's HTML
+ * parser hands the attribute value through unmangled) — the two decode in
+ * reverse order as the browser processes them.
+ */
+function jsAttr(value) {
+    return esc(String(value == null ? "" : value)
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'")
+        .replace(/\r?\n/g, "\\n"));
+}
+
 const STYLE = `
     :root { color-scheme: light; }
     * { box-sizing: border-box; }
@@ -31,6 +52,17 @@ const STYLE = `
     .row > div { flex: 1; min-width: 180px; }
     button, .btn { background: #2563eb; color: #fff; border: none; padding: 9px 16px; border-radius: 6px; font-size: 14px; cursor: pointer; text-decoration: none; display: inline-block; }
     button.secondary, .btn.secondary { background: #6b7280; }
+    button.danger, .btn.danger { background: #dc2626; }
+    .actions-cell { white-space: nowrap; text-align: right; }
+    .icon-btn { display: inline-block; text-decoration: none; background: #eef0f3; color: #1c1e21; border: none; padding: 6px 9px; border-radius: 6px; font-size: 14px; cursor: pointer; margin-left: 4px; line-height: 1; }
+    .icon-btn:hover { background: #e2e5ea; }
+    .icon-btn.danger { background: #fee2e2; }
+    .icon-btn.danger:hover { background: #fecaca; }
+    .fab { position: fixed; right: 24px; bottom: 24px; z-index: 60; border-radius: 999px; padding: 13px 20px; box-shadow: 0 6px 20px rgba(0,0,0,.3); font-size: 14px; }
+    .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); align-items: center; justify-content: center; z-index: 100; padding: 20px; }
+    .modal-backdrop.open { display: flex; }
+    .modal-box { background: #f4f5f7; border-radius: 12px; padding: 20px; max-width: 640px; width: 100%; max-height: 85vh; overflow: auto; }
+    .modal-box .panel:last-child { margin-bottom: 0; }
     .gallery { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
     .gallery img { width: 110px; height: 110px; object-fit: cover; border-radius: 8px; border: 1px solid #eee; }
     .price-row { display: flex; align-items: baseline; gap: 10px; }
@@ -61,4 +93,4 @@ function layout(title, bodyHtml) {
 </html>`;
 }
 
-module.exports = { layout, esc };
+module.exports = { layout, esc, jsAttr };

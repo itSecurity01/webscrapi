@@ -40,13 +40,23 @@ function pendingUploadPanel(pendingUpload) {
       ${dupeHtml}
       <div class="panel">
         <form method="post" action="/batch/start" style="display:inline;">
+          <label style="display:block; margin-bottom:12px; font-weight:normal;">
+            <input type="checkbox" name="headed" style="margin-right:6px;">
+            Run in headed mode (visible browser window — useful for watching/debugging a run)
+          </label>
           <button type="submit">Start scrape (${distinctUrls} product${distinctUrls === 1 ? "" : "s"})</button>
         </form>
-        <a class="btn secondary" href="/batch">Upload a different file instead</a>
+        <form method="post" action="/batch/upload-reset" style="display:inline;">
+          <button type="submit" class="secondary">Upload a different file instead</button>
+        </form>
       </div>`;
 }
 
-function statusPanel(status, runSummary) {
+function statusPanel(status, runSummary, notice) {
+    const noticeHtml = notice
+        ? `<div class="panel" style="background:${notice.type === "error" ? "#fee2e2" : "#d1fae5"}; color:${notice.type === "error" ? "#991b1b" : "#065f46"};">${esc(notice.text)}</div>`
+        : "";
+
     const elapsedNote = status.exitedAt
         ? `finished ${esc(status.exitedAt)}`
         : `started ${esc(status.startedAt)}`;
@@ -70,17 +80,21 @@ function statusPanel(status, runSummary) {
 
     const actions = status.state === "running"
         ? `<form method="post" action="/batch/stop" onsubmit="return confirm('Stop the running scrape? Progress so far is safe (state/run.json), but this run won\\'t finish.');">
-             <button type="submit" class="secondary">Stop scrape</button>
+             <button type="submit" class="secondary">⏹️ Stop scrape</button>
            </form>`
-        : `<a class="btn" href="/">Go to the review dashboard &rarr;</a>
+        : `<a class="btn" href="/">📊 Go to the review dashboard &rarr;</a>
            <form method="post" action="/batch/reset" style="display:inline;">
-             <button type="submit" class="secondary">Start a new upload</button>
+             <button type="submit" class="secondary">🔄 Start a new upload</button>
+           </form>
+           <form method="post" action="/batch/discard" style="display:inline;" onsubmit="return confirm('Discard this test run? Its output/ data and state/run.json entries move into archive/ (nothing is deleted), so these URLs stop counting as already-scraped. Only do this for a throwaway test run \\u2014 not a real batch you still need to review.');">
+             <button type="submit" class="danger">🗑️ Discard this test run</button>
            </form>`;
 
     return `
+      ${noticeHtml}
       <div class="panel">
         <h2>Scrape — <span style="color:${stateColor}">${stateLabel}</span></h2>
-        <p class="muted">Input: <code>${esc(status.inputPath)}</code> — ${elapsedNote}${status.exitCode != null ? ` (exit code ${status.exitCode})` : ""}</p>
+        <p class="muted">Input: <code>${esc(status.inputPath)}</code>${status.headed ? " — headed (visible browser)" : ""} — ${elapsedNote}${status.exitCode != null ? ` (exit code ${status.exitCode})` : ""}</p>
         ${countsHtml}
         ${status.error ? `<p style="color:#991b1b;">Error: ${esc(status.error)}</p>` : ""}
         ${transformHtml}
@@ -93,7 +107,7 @@ function statusPanel(status, runSummary) {
 function batchView({ status, pendingUpload, runSummary, notice }) {
     let body;
     if (status.state === "running" || status.state === "done" || status.state === "failed") {
-        body = statusPanel(status, runSummary);
+        body = statusPanel(status, runSummary, notice);
     } else if (pendingUpload) {
         body = pendingUploadPanel(pendingUpload);
     } else {

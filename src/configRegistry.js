@@ -19,6 +19,7 @@ const controlz = require("./configs/controlz");
 const sangeetha = require("./configs/sangeetha");
 const digihaat = require("./configs/digihaat");
 const plumgoodness = require("./configs/plumgoodness");
+const bellavita = require("./configs/bellavita");
 
 // Adding a new website = one new config file + one new entry here.
 // Nothing in domainRouter.js or scraper.js should ever need to change.
@@ -44,4 +45,5 @@ module.exports = [
     { test: (hostname) => hostname.includes("sangeetha.com"), config: sangeetha },
     { test: (hostname) => hostname.includes("digihaat.in"), config: digihaat },
     { test: (hostname) => hostname.includes("plumgoodness.com"), config: plumgoodness },
+    { test: (hostname) => hostname.includes("bellavitaorganic.com"), config: bellavita },
 ];

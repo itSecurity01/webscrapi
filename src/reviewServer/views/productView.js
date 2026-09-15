@@ -1,8 +1,10 @@
-const { layout, esc } = require("./layout");
+const { layout, esc, jsAttr } = require("./layout");
 
 function productView(draft, imageUrls, { saved = false } = {}) {
     const meta = draft._meta;
     const gallery = imageUrls.map(u => `<img src="${esc(u)}" onerror="this.style.display='none'">`).join("");
+    const deleteAction = `/product/${encodeURIComponent(meta.site)}/${encodeURIComponent(meta.slug)}/delete`;
+    const confirmMsg = `Delete “${jsAttr(draft.name)}”? This permanently removes its scraped data (images, product.json, upload.json) from output/. This cannot be undone.`;
 
     const body = `
       <p class="back-link"><a href="/">&larr; back to all products</a></p>
@@ -17,8 +19,13 @@ function productView(draft, imageUrls, { saved = false } = {}) {
               <span class="discount">${esc(draft.discount)}% off</span>
               <span class="rating">★ ${esc(draft.rating)}</span>
             </div>
-            <p class="muted">SKU: ${esc(draft.vendorSku)} · Source: <a href="${esc(meta.sourceUrl)}" target="_blank" rel="noopener">${esc(meta.site)}</a></p>
+            <p class="muted">SKU: ${esc(draft.vendorSku)} · Source: <a href="${esc(meta.sourceUrl)}" target="_blank" rel="noopener">👁️ ${esc(meta.site)}</a></p>
             <div class="gallery">${gallery || '<span class="muted">No images</span>'}</div>
+          </div>
+          <div>
+            <form method="post" action="${deleteAction}" onsubmit="return confirm('${confirmMsg}');">
+              <button type="submit" class="danger">🗑️ Delete this product</button>
+            </form>
           </div>
         </div>
       </div>

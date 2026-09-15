@@ -1,6 +1,5 @@
 require("dotenv").config();
 const path = require("path");
-const { chromium } = require("playwright");
 const pLimit = require("p-limit");
 
 const { parseCliArgs } = require("./cli");
@@ -12,6 +11,7 @@ const { downloadImages } = require("./imageDownloader");
 const { ensureProductFolder, saveProduct, saveScreenshot } = require("./storage");
 const { RunState } = require("./runState");
 const { DomainRateLimiter } = require("./utils/rateLimiter");
+const { BrowserPool } = require("./utils/browserPool");
 const logger = require("./utils/logger");
 
 const PRODUCT_CONCURRENCY = parseInt(process.env.PRODUCT_CONCURRENCY || "2", 10);
@@ -23,6 +23,13 @@ const DOMAIN_DELAY_JITTER_MS = parseInt(process.env.DOMAIN_DELAY_JITTER_MS || "4
 // on one product — every color variant's shots, all on one page) can return
 // far more images than you actually want downloaded per product.
 const MAX_IMAGES_PER_PRODUCT = parseInt(process.env.MAX_IMAGES_PER_PRODUCT || "0", 10);
+// Real browser engines to rotate between (each request gets a fresh context
+// picked at random from these) — a genuine Edge or Firefox binary rotates
+// the User-Agent, Client Hints and JS fingerprint together, which is far
+// harder for bot detection to flag than a fake UA string bolted onto one
+// Chromium build. Engines that aren't installed are skipped automatically.
+const SCRAPER_ENGINES = (process.env.SCRAPER_ENGINES || "chrome,msedge,firefox")
+    .split(",").map(s => s.trim()).filter(Boolean);
 
 async function withRetry(fn, retries) {
     let lastError;
@@ -39,8 +46,11 @@ async function withRetry(fn, retries) {
     throw lastError;
 }
 
-async function processRow(row, { context, config, rateLimiter, state, excelResults, args }) {
+async function processRow(row, { pool, config, rateLimiter, state, excelResults, args }) {
     const startedAt = Date.now();
+    // Fresh context per request, on a randomly picked engine (Chrome/Edge/
+    // Firefox) — this is what actually rotates the User-Agent between requests.
+    const { context, engine } = await pool.newContext();
     const page = await context.newPage();
 
     try {
@@ -94,6 +104,7 @@ async function processRow(row, { context, config, rateLimiter, state, excelResul
             imageCount: imageResults.filter(i => i.success).length,
             imagesFound,
             durationMs: Date.now() - startedAt,
+            engine,
         });
 
         state.markDone(row.url);
@@ -101,12 +112,13 @@ async function processRow(row, { context, config, rateLimiter, state, excelResul
         return true;
     } catch (error) {
         await saveScreenshot(page, config.name, row.url);
-        logger.logFailure({ url: row.url, website: config.name, error });
+        logger.logFailure({ url: row.url, website: config.name, error, engine });
         state.markFailed(row.url, error);
         excelResults.set(row.url, { status: "failed", error: error.message || String(error) });
         return false;
     } finally {
         await page.close().catch(() => {});
+        await context.close().catch(() => {});
     }
 }
 
@@ -127,11 +139,9 @@ async function main() {
     const rateLimiter = new DomainRateLimiter({ delayMs: DOMAIN_DELAY_MS, jitterMs: DOMAIN_DELAY_JITTER_MS });
     const excelResults = new Map();
 
-    const browser = await chromium.launch({
-    headless: !args.headed,
-    channel: "chrome"
-});
-    const context = await browser.newContext();
+    const pool = new BrowserPool({ headless: !args.headed, engines: SCRAPER_ENGINES });
+    const launchedEngines = await pool.init();
+    console.log(`Rotating requests across: ${launchedEngines.join(", ")}`);
 
     let shuttingDown = false;
     const shutdown = async () => {
@@ -139,8 +149,7 @@ async function main() {
         shuttingDown = true;
         console.log("\nShutting down gracefully...");
         state.save();
-        await context.close().catch(() => {});
-        await browser.close().catch(() => {});
+        await pool.closeAll();
         process.exit(1);
     };
     process.on("SIGINT", shutdown);
@@ -172,7 +181,7 @@ async function main() {
         }
 
         processed++;
-        const ok = await processRow(row, { context, config, rateLimiter, state, excelResults, args });
+        const ok = await processRow(row, { pool, config, rateLimiter, state, excelResults, args });
         if (ok) succeeded++; else failed++;
     }));
 
@@ -198,8 +207,7 @@ async function main() {
             console.warn(`Could not write results back to Excel: ${error.message}`);
         }
 
-        await context.close().catch(() => {});
-        await browser.close().catch(() => {});
+        await pool.closeAll();
     }
 }
 
