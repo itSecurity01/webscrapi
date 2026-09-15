@@ -12,6 +12,8 @@
 // via DEFAULT_CAMPAIGN_USER_ID, see toCampaignDocument.js) if that changes.
 const DEFAULT_USER_ID = "68a404def358202d178e6b6a";
 
+const { filterProductImages } = require("../utils/imageFilter");
+
 /** Strip everything but digits/dot from a raw numeric-ish string ("1,999" -> 1999). */
 function parseNumber(raw) {
     if (raw == null) return 0;
@@ -48,7 +50,11 @@ function pickImageUrls(images) {
     const list = Array.isArray(images) ? images : [];
     const successful = list.filter(img => img && img.success && img.url);
     const usable = successful.length > 0 ? successful : list.filter(img => img && img.url);
-    return usable.map(img => img.url);
+    // Also filters here (not just in the scrape pipeline, src/index.js) so
+    // re-running the transform (--force) over an already-scraped
+    // product.json retroactively drops any junk asset that slipped in
+    // before this filter existed, with no re-scrape needed.
+    return filterProductImages(usable.map(img => img.url));
 }
 
 /**

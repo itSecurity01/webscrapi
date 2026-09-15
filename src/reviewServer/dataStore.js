@@ -32,6 +32,19 @@ function readDraft(site, slug) {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
 
+/** Raw product.json sitting next to upload.json — the download manifest
+ * (images[].url/.path/.success) that resolveImageEntries() below uses to
+ * find a local cached copy of a remote image URL. `null` if missing. */
+function readProductJson(site, slug) {
+    const filePath = path.join(folderPath(site, slug), "product.json");
+    if (!fs.existsSync(filePath)) return null;
+    try {
+        return JSON.parse(fs.readFileSync(filePath, "utf8"));
+    } catch {
+        return null;
+    }
+}
+
 function writeDraft(site, slug, draft) {
     fs.writeFileSync(draftPath(site, slug), JSON.stringify(draft, null, 2), "utf8");
 }
@@ -137,10 +150,47 @@ function resolveImageUrls(site, slug, draft) {
     return [draft.image, ...(draft.subImages || [])].filter(Boolean);
 }
 
+/**
+ * Editable gallery for the product page: `draft.image`/`draft.subImages`
+ * (in that order) are the actual export source of truth — what a reviewer
+ * removes or reorders here is what ends up in the upload payload — so
+ * unlike resolveImageUrls() above (which just lists whatever's on disk,
+ * for the dashboard's read-only thumbnail), this builds its list FROM
+ * those two fields and only uses the local download as a nicer `displayUrl`
+ * when one exists, via product.json's own url->path manifest. Falls back to
+ * hotlinking the original url when there's no local copy (e.g.
+ * --skip-images, or a URL a reviewer pasted in by hand).
+ *
+ * Returns [{ url, displayUrl }], one per image, in draft order.
+ */
+function resolveImageEntries(site, slug, draft) {
+    const orderedUrls = [draft.image, ...(draft.subImages || [])].filter(Boolean);
+    if (orderedUrls.length === 0) return [];
+
+    const productJson = readProductJson(site, slug);
+    const localPathByUrl = new Map();
+    if (productJson && Array.isArray(productJson.images)) {
+        for (const img of productJson.images) {
+            if (img && img.url && img.success && img.path) {
+                localPathByUrl.set(img.url, img.path);
+            }
+        }
+    }
+
+    return orderedUrls.map(url => {
+        const localPath = localPathByUrl.get(url);
+        const displayUrl = localPath
+            ? `/media/${encodeURIComponent(site)}/${encodeURIComponent(slug)}/${encodeURIComponent(path.basename(localPath))}`
+            : url;
+        return { url, displayUrl };
+    });
+}
+
 module.exports = {
     OUTPUT_DIR,
     EDITABLE_FIELDS,
     readDraft,
+    readProductJson,
     writeDraft,
     listDrafts,
     listLocalImages,
@@ -149,4 +199,5 @@ module.exports = {
     deleteDraft,
     folderPath,
     resolveImageUrls,
+    resolveImageEntries,
 };

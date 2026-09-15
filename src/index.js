@@ -12,6 +12,7 @@ const { ensureProductFolder, saveProduct, saveScreenshot } = require("./storage"
 const { RunState } = require("./runState");
 const { DomainRateLimiter } = require("./utils/rateLimiter");
 const { BrowserPool } = require("./utils/browserPool");
+const { filterProductImages } = require("./utils/imageFilter");
 const logger = require("./utils/logger");
 
 const PRODUCT_CONCURRENCY = parseInt(process.env.PRODUCT_CONCURRENCY || "2", 10);
@@ -86,10 +87,17 @@ async function processRow(row, { pool, config, rateLimiter, state, excelResults,
             { url: row.url, rateLimiter }
         );
 
-        const imagesFound = raw.imageUrls.length;
+        // Drop known non-product assets (star/mask/icon/logo/payment-badge
+        // filenames, ...) before anything downstream even sees them — never
+        // downloaded, never counted, never shown in review. See
+        // utils/imageFilter.js for what "junk" means here.
+        const cleanImageUrls = filterProductImages(raw.imageUrls);
+        const junkFiltered = raw.imageUrls.length - cleanImageUrls.length;
+
+        const imagesFound = cleanImageUrls.length;
         const imageUrlsToDownload = MAX_IMAGES_PER_PRODUCT > 0
-            ? raw.imageUrls.slice(0, MAX_IMAGES_PER_PRODUCT)
-            : raw.imageUrls;
+            ? cleanImageUrls.slice(0, MAX_IMAGES_PER_PRODUCT)
+            : cleanImageUrls;
 
         const folder = ensureProductFolder(config.name, raw.product.name || row.url, row.url);
 
@@ -99,7 +107,7 @@ async function processRow(row, { pool, config, rateLimiter, state, excelResults,
         // upload transform) reads image URLs straight from product.json, so
         // a local copy isn't required just to build an upload payload.
         const imageResults = args.skipImages
-            ? raw.imageUrls.map(url => ({ url, path: null, success: false, hash: null, error: "skipped" }))
+            ? cleanImageUrls.map(url => ({ url, path: null, success: false, hash: null, error: "skipped" }))
             : await downloadImages(imageUrlsToDownload, folder, {
                 concurrency: IMAGE_CONCURRENCY,
                 rateLimiter,
@@ -130,6 +138,7 @@ async function processRow(row, { pool, config, rateLimiter, state, excelResults,
             product: product.product.name,
             imageCount: imageResults.filter(i => i.success).length,
             imagesFound,
+            imagesFiltered: junkFiltered,
             durationMs: Date.now() - startedAt,
             engine,
         });

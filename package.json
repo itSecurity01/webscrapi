@@ -13,6 +13,7 @@
     "combine-uploads": "node src/combineUploads.js",
     "mark-uploaded": "node src/markUploaded.js",
     "check-duplicates": "node src/checkDuplicates.js",
+    "clean-images": "node src/cleanJunkImages.js",
     "upload-mongo": "node src/uploadToMongo.js",
     "to-mongo-import": "node src/toMongoImportJson.js",
     "import-to-mongo": "node src/toMongoImportJson.js --shell",

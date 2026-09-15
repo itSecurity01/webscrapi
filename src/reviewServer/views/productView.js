@@ -1,8 +1,16 @@
 const { layout, esc, jsAttr } = require("./layout");
 
-function productView(draft, imageUrls, { saved = false } = {}) {
+function productView(draft, imageEntries, { saved = false } = {}) {
     const meta = draft._meta;
-    const gallery = imageUrls.map(u => `<img src="${esc(u)}" onerror="this.style.display='none'">`).join("");
+    // draggable="true" is wired up to actually reorder in the script block
+    // below; each item's own source-of-truth value lives in data-url (the
+    // real URL that gets saved), while the <img> shows displayUrl (the
+    // locally-cached copy when one exists, see resolveImageEntries()).
+    const gallery = imageEntries.map(entry => `
+        <div class="gallery-item" draggable="true" data-url="${esc(entry.url)}">
+          <img src="${esc(entry.displayUrl)}" onerror="this.style.display='none'">
+          <button type="button" class="gallery-item__remove" title="Remove image" onclick="removeGalleryImage(this)">✕</button>
+        </div>`).join("");
     const deleteAction = `/product/${encodeURIComponent(meta.site)}/${encodeURIComponent(meta.slug)}/delete`;
     const confirmMsg = `Delete “${jsAttr(draft.name)}”? This permanently removes its scraped data (images, product.json, upload.json) from output/. This cannot be undone.`;
 
@@ -20,7 +28,8 @@ function productView(draft, imageUrls, { saved = false } = {}) {
               <span class="rating">★ ${esc(draft.rating)}</span>
             </div>
             <p class="muted">SKU: ${esc(draft.vendorSku)} · Source: <a href="${esc(meta.sourceUrl)}" target="_blank" rel="noopener">👁️ ${esc(meta.site)}</a></p>
-            <div class="gallery">${gallery || '<span class="muted">No images</span>'}</div>
+            <div class="gallery" id="gallery">${gallery}</div>
+            <p class="muted" id="gallery-empty" ${imageEntries.length > 0 ? 'hidden' : ""}>No images. Drag to reorder, ✕ to remove — changes are saved when you click Save below.</p>
           </div>
           <div>
             <form method="post" action="${deleteAction}" onsubmit="return confirm('${confirmMsg}');">
@@ -101,10 +110,11 @@ function productView(draft, imageUrls, { saved = false } = {}) {
           <textarea name="additionalInformation">${esc(draft.additionalInformation)}</textarea>
 
           <label>Main image URL</label>
-          <input type="text" name="image" value="${esc(draft.image)}">
+          <input type="text" name="image" id="image-input" value="${esc(draft.image)}">
 
           <label>Sub images (one URL per line)</label>
-          <textarea name="subImages" style="min-height:120px;">${esc((draft.subImages || []).join("\n"))}</textarea>
+          <textarea name="subImages" id="subimages-input" style="min-height:120px;">${esc((draft.subImages || []).join("\n"))}</textarea>
+          <p class="muted" style="margin-top:4px;">Kept in sync with the gallery above (✕ to remove, drag to reorder) — or edit this list directly, e.g. to add a brand-new image URL.</p>
 
           <div style="margin-top:16px; display:flex; gap:10px; align-items:center;">
             <button type="submit" name="markReviewed" value="1">Save &amp; mark reviewed</button>
@@ -112,7 +122,65 @@ function productView(draft, imageUrls, { saved = false } = {}) {
             <span class="status status-${esc(meta.status)}">${esc(meta.status)}</span>
           </div>
         </form>
-      </div>`;
+      </div>
+
+      <script>
+        var gallery = document.getElementById('gallery');
+        var galleryEmpty = document.getElementById('gallery-empty');
+        var imageInput = document.getElementById('image-input');
+        var subImagesInput = document.getElementById('subimages-input');
+
+        // Rewrites the existing Main image URL / Sub images fields from
+        // whatever .gallery-item elements remain, in their current DOM
+        // order — the same two fields the Save button already POSTs, so
+        // removing/reordering here needs no new backend route; it's staged
+        // until Save like every other field on this page.
+        function syncImageFields() {
+          var items = gallery.querySelectorAll('.gallery-item');
+          var urls = Array.prototype.map.call(items, function (el) { return el.getAttribute('data-url'); });
+          imageInput.value = urls[0] || '';
+          subImagesInput.value = urls.slice(1).join('\\n');
+          galleryEmpty.hidden = items.length > 0;
+        }
+
+        function removeGalleryImage(btn) {
+          var item = btn.closest('.gallery-item');
+          item.parentNode.removeChild(item);
+          syncImageFields();
+        }
+
+        // Drag-and-drop reorder (desktop/mouse only — HTML5 DnD has no
+        // native touch support). Dragging one .gallery-item over another
+        // swaps it into that position; drop just commits the new order.
+        var dragEl = null;
+
+        gallery.addEventListener('dragstart', function (e) {
+          var item = e.target.closest('.gallery-item');
+          if (!item) return;
+          dragEl = item;
+          item.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+        });
+
+        gallery.addEventListener('dragover', function (e) {
+          if (!dragEl) return;
+          e.preventDefault();
+          var target = e.target.closest('.gallery-item');
+          if (!target || target === dragEl) return;
+
+          var items = Array.prototype.slice.call(gallery.children);
+          var dragIdx = items.indexOf(dragEl);
+          var targetIdx = items.indexOf(target);
+          gallery.insertBefore(dragEl, dragIdx < targetIdx ? target.nextSibling : target);
+        });
+
+        gallery.addEventListener('dragend', function () {
+          if (!dragEl) return;
+          dragEl.classList.remove('dragging');
+          dragEl = null;
+          syncImageFields();
+        });
+      </script>`;
 
     return layout(draft.name, body);
 }

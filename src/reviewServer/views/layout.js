@@ -64,7 +64,11 @@ const STYLE = `
     .modal-box { background: #f4f5f7; border-radius: 12px; padding: 20px; max-width: 640px; width: 100%; max-height: 85vh; overflow: auto; }
     .modal-box .panel:last-child { margin-bottom: 0; }
     .gallery { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
-    .gallery img { width: 110px; height: 110px; object-fit: cover; border-radius: 8px; border: 1px solid #eee; }
+    .gallery img { width: 110px; height: 110px; object-fit: cover; border-radius: 8px; border: 1px solid #eee; display: block; }
+    .gallery-item { position: relative; cursor: grab; }
+    .gallery-item.dragging { opacity: .4; }
+    .gallery-item__remove { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; padding: 0; line-height: 20px; text-align: center; border-radius: 50%; background: rgba(0,0,0,.55); color: #fff; font-size: 13px; border: none; cursor: pointer; }
+    .gallery-item__remove:hover { background: #dc2626; }
     .price-row { display: flex; align-items: baseline; gap: 10px; }
     .price { font-size: 22px; font-weight: 700; }
     .mrp { text-decoration: line-through; color: #999; }

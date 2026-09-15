@@ -30,7 +30,7 @@ function appendRecord(record) {
     fs.writeFileSync(filePath, JSON.stringify(records, null, 2), "utf8");
 }
 
-function logSuccess({ url, website, product, imageCount, imagesFound, durationMs, engine }) {
+function logSuccess({ url, website, product, imageCount, imagesFound, imagesFiltered, durationMs, engine }) {
     appendRecord({
         url,
         website,
@@ -38,6 +38,7 @@ function logSuccess({ url, website, product, imageCount, imagesFound, durationMs
         product,
         images: imageCount,
         imagesFound,
+        imagesFiltered,
         durationMs,
         engine,
     });

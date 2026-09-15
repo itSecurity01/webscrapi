@@ -99,8 +99,8 @@ function createApp() {
         const draft = store.readDraft(site, slug);
         if (!draft) return res.status(404).send(`No upload.json for ${site}/${slug}. Run "npm run transform" first.`);
 
-        const imageUrls = store.resolveImageUrls(site, slug, draft);
-        res.send(productView(draft, imageUrls, { saved: req.query.saved === "1" }));
+        const imageEntries = store.resolveImageEntries(site, slug, draft);
+        res.send(productView(draft, imageEntries, { saved: req.query.saved === "1" }));
     });
 
     app.post("/product/:site/:slug", (req, res) => {
