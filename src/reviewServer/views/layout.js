@@ -65,7 +65,12 @@ const STYLE = `
     .modal-box .panel:last-child { margin-bottom: 0; }
     .gallery { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
     .gallery img { width: 110px; height: 110px; object-fit: cover; border-radius: 8px; border: 1px solid #eee; display: block; }
-    .gallery-item { position: relative; cursor: grab; }
+    /* Fixed size lives on the wrapper, not just the <img> — if the image
+       404s and its onerror hides it, the wrapper (and the ✕ button
+       position:absolute inside it) must not collapse to 0x0, or the button
+       becomes unreachable/overlaps its neighbors. */
+    .gallery-item { position: relative; width: 110px; height: 110px; flex: none; cursor: grab; }
+    .gallery-item img { width: 100%; height: 100%; }
     .gallery-item.dragging { opacity: .4; }
     .gallery-item__remove { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; padding: 0; line-height: 20px; text-align: center; border-radius: 50%; background: rgba(0,0,0,.55); color: #fff; font-size: 13px; border: none; cursor: pointer; }
     .gallery-item__remove:hover { background: #dc2626; }
