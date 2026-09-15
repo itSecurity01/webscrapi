@@ -24,16 +24,42 @@ const DOMAIN_DELAY_JITTER_MS = parseInt(process.env.DOMAIN_DELAY_JITTER_MS || "4
 // far more images than you actually want downloaded per product.
 const MAX_IMAGES_PER_PRODUCT = parseInt(process.env.MAX_IMAGES_PER_PRODUCT || "0", 10);
 
-async function withRetry(fn, retries) {
+// How long to hold a domain after it answers 429/503 with no Retry-After
+// header. Doubles on each repeat hit for the same URL, capped at the max
+// (0 = no cap; not recommended, a site can ask for a very long wait).
+const THROTTLE_BACKOFF_MS = parseInt(process.env.THROTTLE_BACKOFF_MS || "60000", 10);
+const THROTTLE_BACKOFF_MAX_MS = parseInt(process.env.THROTTLE_BACKOFF_MAX_MS || "300000", 10);
+const THROTTLE_STATUSES = new Set([429, 503]);
+
+function isThrottled(error) {
+    return THROTTLE_STATUSES.has(error && error.status);
+}
+
+async function withRetry(fn, retries, { url, rateLimiter } = {}) {
     let lastError;
+    let throttleHits = 0;
     for (let attempt = 0; attempt <= retries; attempt++) {
         try {
             return await fn();
         } catch (error) {
             lastError = error;
-            if (attempt < retries) {
-                await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+            if (attempt >= retries) break;
+
+            if (isThrottled(error) && rateLimiter && url) {
+                // The site said "too many requests". Retrying in 500ms is
+                // what turns one blocked page into a blocked run, so pause the
+                // whole domain: Retry-After if the site gave one, otherwise a
+                // doubling backoff. The retry below re-enters
+                // rateLimiter.schedule(), which honours the pause.
+                throttleHits++;
+                let waitMs = error.retryAfterMs || THROTTLE_BACKOFF_MS * 2 ** (throttleHits - 1);
+                if (THROTTLE_BACKOFF_MAX_MS > 0) waitMs = Math.min(waitMs, THROTTLE_BACKOFF_MAX_MS);
+                rateLimiter.pauseDomain(url, waitMs);
+                console.log(`[throttle] HTTP ${error.status} from ${new URL(url).hostname} — pausing that domain for ${Math.round(waitMs / 1000)}s (retry ${attempt + 1}/${retries})`);
+                continue;
             }
+
+            await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
         }
     }
     throw lastError;
@@ -46,7 +72,8 @@ async function processRow(row, { context, config, rateLimiter, state, excelResul
     try {
         const raw = await withRetry(
             () => rateLimiter.schedule(row.url, () => scrapeProduct(page, row.url, config)),
-            MAX_RETRIES
+            MAX_RETRIES,
+            { url: row.url, rateLimiter }
         );
 
         const imagesFound = raw.imageUrls.length;

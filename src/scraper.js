@@ -173,7 +173,16 @@ async function extractAdditionalInfo(page, config) {
 async function scrapeProduct(page, url, config) {
     const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
     if (!response || !response.ok()) {
-        throw new Error(`Navigation failed: HTTP ${response ? response.status() : "no response"} for ${url}`);
+        const error = new Error(`Navigation failed: HTTP ${response ? response.status() : "no response"} for ${url}`);
+        error.status = response ? response.status() : null;
+        // Retry-After is seconds (or an HTTP date); normalise to ms so the
+        // caller can pause the domain for exactly as long as the site asked.
+        const retryAfter = response ? response.headers()["retry-after"] : null;
+        if (retryAfter) {
+            const secs = Number(retryAfter);
+            error.retryAfterMs = Number.isFinite(secs) ? secs * 1000 : Math.max(0, Date.parse(retryAfter) - Date.now());
+        }
+        throw error;
     }
 
     if (typeof config.beforeExtract === "function") {
