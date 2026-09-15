@@ -6,6 +6,8 @@ const tatacliq = require("./configs/tatacliq");
 const wishluck = require("./configs/wishluck");
 const muscleblaze = require("./configs/muscleblaze");
 const booksToScrapeDemo = require("./configs/booksToScrapeDemo");
+const firstcry = require("./configs/firstcry");
+const namakwali = require("./configs/namakwali");
 
 // Adding a new website = one new config file + one new entry here.
 // Nothing in domainRouter.js or scraper.js should ever need to change.
@@ -18,4 +20,6 @@ module.exports = [
     { test: (hostname) => hostname.includes("wishluck"), config: wishluck },
     { test: (hostname) => hostname.includes("muscleblaze"), config: muscleblaze },
     { test: (hostname) => hostname.includes("books.toscrape.com"), config: booksToScrapeDemo },
+    { test: (hostname) => hostname.includes("firstcry"), config: firstcry },
+    { test: (hostname) => hostname.includes("namakwali"), config: namakwali },
 ];

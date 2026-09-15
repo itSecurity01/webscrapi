@@ -250,7 +250,11 @@ async function scrapeProduct(page, url, config) {
     let imageUrls = [];
     const jsonLdImages = jsonLd?.image;
     if (jsonLdImages) {
+        // Entries may be plain URL strings or schema.org ImageObject nodes
+        // ({ "@type": "ImageObject", url, width, height }) — FirstCry does
+        // the latter. Unwrap so normalizeUrl never sees an object.
         imageUrls = (Array.isArray(jsonLdImages) ? jsonLdImages : [jsonLdImages])
+            .map(u => (u && typeof u === "object") ? (u.url || u.contentUrl || null) : u)
             .map(u => normalizeUrl(u, url))
             .filter(Boolean);
         record("images", "json-ld", "image", imageUrls.length > 0);
