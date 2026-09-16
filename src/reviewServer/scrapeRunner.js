@@ -22,6 +22,11 @@ const { archiveBatch } = require("../archiveBatch");
 const PROJECT_ROOT = path.join(__dirname, "..", "..");
 const INDEX_JS = path.join(__dirname, "..", "index.js");
 const MAX_LOG_LINES = 500;
+// How often to run the product.json -> upload.json transform WHILE a scrape
+// is still running, so products that finished early show up in the review
+// dashboard without waiting for the whole batch (or a manual stop) — see
+// the big comment on the interval below for the full story.
+const LIVE_TRANSFORM_INTERVAL_MS = parseInt(process.env.LIVE_TRANSFORM_INTERVAL_MS || "10000", 10);
 
 // The raw workbook the user uploaded, waiting for them to pick which
 // sheet(s) to turn into input/products.xlsx (see excelNormalizer.js).
@@ -95,29 +100,42 @@ function startScrape({ inputPath, headed = false }) {
     child.stdout.on("data", pushOutput);
     child.stderr.on("data", pushOutput);
 
+    // Run the product.json -> upload.json transform on a timer WHILE the
+    // scrape is still going, so a product that finished downloading shows up
+    // as a draft on the review dashboard right away — instead of the
+    // dashboard sitting empty until the entire batch (which can be hundreds
+    // of URLs) finishes or is stopped. Same runTransform() the post-exit step
+    // below already used; it only ever creates upload.json for folders that
+    // don't have one yet, so it's safe to call repeatedly and can't clobber
+    // review-UI edits. Cleared as soon as the child exits/errors so it never
+    // outlives the job.
+    const liveTransform = () => {
+        try {
+            thisJob.transform = runTransform({});
+        } catch (error) {
+            thisJob.transform = { error: error.message };
+        }
+    };
+    const liveTransformTimer = setInterval(liveTransform, LIVE_TRANSFORM_INTERVAL_MS);
+
     child.on("exit", (code) => {
+        clearInterval(liveTransformTimer);
         thisJob.exitCode = code;
 
-        // Auto-run the transform step (product.json -> upload.json) right
-        // after a successful scrape, so the review dashboard has drafts to
-        // show without a separate "npm run transform" in a terminal — that
-        // CLI dependency sitting in the middle of an otherwise browser-only
-        // flow would defeat the point of this page. Safe to run even if the
-        // scrape partially failed (transform only touches folders that
-        // already have a product.json); never overwrites an existing
-        // upload.json (no --force), so it can't clobber review-UI edits
-        // from an earlier batch that's still sitting around.
-        if (code === 0) {
-            try {
-                thisJob.transform = runTransform({});
-            } catch (error) {
-                thisJob.transform = { error: error.message };
-            }
-        }
+        // Final pass to catch anything that finished after the last timer
+        // tick (or, for a short scrape, before the timer ever fired). Runs
+        // regardless of exit code — including a manual stop mid-batch — so
+        // whatever finished downloading before the scrape was cut off still
+        // shows up as a draft. Safe either way: transform only touches
+        // folders that already have a product.json, and never overwrites an
+        // existing upload.json (no --force), so it can't clobber review-UI
+        // edits from an earlier batch that's still sitting around.
+        liveTransform();
 
         thisJob.exitedAt = new Date().toISOString();
     });
     child.on("error", (err) => {
+        clearInterval(liveTransformTimer);
         thisJob.error = err.message;
         thisJob.exitCode = -1;
         thisJob.exitedAt = new Date().toISOString();

@@ -33,11 +33,12 @@ function parseDiscountPercent(raw) {
     return match ? parseFloat(match[0]) : 0;
 }
 
-/** Random star rating in [4.0, 5.0], one decimal place — see plan: no real
- * per-product rating is available from the scrape, so a plausible placeholder
- * is generated once and persisted (callers must not regenerate on every read). */
+/** Random star rating, 4 or 5 (whole numbers only — ratings are stored as
+ * plain integers, not decimals) — see plan: no real per-product rating is
+ * available from the scrape, so a plausible placeholder is generated once
+ * and persisted (callers must not regenerate on every read). */
 function randomRating() {
-    return Math.round((4 + Math.random()) * 10) / 10;
+    return Math.random() < 0.5 ? 4 : 5;
 }
 
 /**
@@ -70,16 +71,28 @@ function transformProduct(productJson) {
     // Prefer a real scraped rating (a config's additionalFields.rating, e.g.
     // boat.js's ".rating__stars") when one is present and parses to a
     // positive number; only fall back to the random placeholder when the
-    // site genuinely gave us nothing to go on.
-    const scrapedRating = parseNumber(additionalInfo.rating);
+    // site genuinely gave us nothing to go on. Rounded to a whole number —
+    // ratings are stored as plain integers, not decimals.
+    const scrapedRating = Math.round(parseNumber(additionalInfo.rating));
+
+    const productPrice = parseNumber(product.price);
+    const scrapedMrp = parseNumber(additionalInfo.mrp);
+    // Some sites only ever show one price (no struck-through "was" price) —
+    // `additionalInfo.mrp` then comes back blank/0, or occasionally equal to
+    // (or below) the selling price. Treat all of those as "not actually on
+    // sale": mrp mirrors price and discount is 0, rather than showing a
+    // fabricated markdown that doesn't exist on the source page.
+    const hasRealMrp = scrapedMrp > productPrice;
+    const mrp = hasRealMrp ? scrapedMrp : productPrice;
+    const discount = hasRealMrp ? parseDiscountPercent(additionalInfo.discountPercent) : 0;
 
     return {
         name: product.name || "",
         userId: DEFAULT_USER_ID,
-        mrp: parseNumber(additionalInfo.mrp),
-        productPrice: parseNumber(product.price),
+        mrp,
+        productPrice,
         rating: scrapedRating > 0 ? scrapedRating : randomRating(),
-        discount: parseDiscountPercent(additionalInfo.discountPercent),
+        discount,
         vendorComment: "",
         program: "",
         gender: "",

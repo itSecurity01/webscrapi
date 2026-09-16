@@ -13,6 +13,7 @@ const { RunState } = require("./runState");
 const { DomainRateLimiter } = require("./utils/rateLimiter");
 const { BrowserPool } = require("./utils/browserPool");
 const { filterProductImages } = require("./utils/imageFilter");
+const { getHostname } = require("./utils/url");
 const logger = require("./utils/logger");
 
 const PRODUCT_CONCURRENCY = parseInt(process.env.PRODUCT_CONCURRENCY || "2", 10);
@@ -31,6 +32,12 @@ const MAX_IMAGES_PER_PRODUCT = parseInt(process.env.MAX_IMAGES_PER_PRODUCT || "0
 // Chromium build. Engines that aren't installed are skipped automatically.
 const SCRAPER_ENGINES = (process.env.SCRAPER_ENGINES || "chrome,msedge,firefox")
     .split(",").map(s => s.trim()).filter(Boolean);
+// How many domains' browser contexts to keep open at once (LRU-evicted) so
+// products from the same site reuse one warm cache/cookie jar instead of
+// starting cold every time — see BrowserPool.contextForDomain(). Only
+// matters for batches spanning many different sites; a single-site batch
+// never comes close to this.
+const MAX_DOMAIN_CONTEXTS = parseInt(process.env.MAX_DOMAIN_CONTEXTS || "8", 10);
 
 // How long to hold a domain after it answers 429/503 with no Retry-After
 // header. Doubles on each repeat hit for the same URL, capped at the max
@@ -75,9 +82,12 @@ async function withRetry(fn, retries, { url, rateLimiter } = {}) {
 
 async function processRow(row, { pool, config, rateLimiter, state, excelResults, args }) {
     const startedAt = Date.now();
-    // Fresh context per request, on a randomly picked engine (Chrome/Edge/
-    // Firefox) — this is what actually rotates the User-Agent between requests.
-    const { context, engine } = await pool.newContext();
+    // One context per domain, reused across every product on that site (not
+    // a fresh one per request) so cache/cookies/connections warm up instead
+    // of starting cold on every single product — see
+    // BrowserPool.contextForDomain(). The engine (Chrome/Edge/Firefox) is
+    // still picked randomly, just once per domain instead of once per request.
+    const { context, engine } = await pool.contextForDomain(getHostname(row.url));
     const page = await context.newPage();
 
     try {
@@ -153,8 +163,9 @@ async function processRow(row, { pool, config, rateLimiter, state, excelResults,
         excelResults.set(row.url, { status: "failed", error: error.message || String(error) });
         return false;
     } finally {
+        // Context is owned by the pool's per-domain cache now, not this
+        // request — only the page (tab) it opened gets closed here.
         await page.close().catch(() => {});
-        await context.close().catch(() => {});
     }
 }
 
@@ -175,7 +186,7 @@ async function main() {
     const rateLimiter = new DomainRateLimiter({ delayMs: DOMAIN_DELAY_MS, jitterMs: DOMAIN_DELAY_JITTER_MS });
     const excelResults = new Map();
 
-    const pool = new BrowserPool({ headless: !args.headed, engines: SCRAPER_ENGINES });
+    const pool = new BrowserPool({ headless: !args.headed, engines: SCRAPER_ENGINES, maxDomainContexts: MAX_DOMAIN_CONTEXTS });
     const launchedEngines = await pool.init();
     console.log(`Rotating requests across: ${launchedEngines.join(", ")}`);
 

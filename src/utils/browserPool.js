@@ -32,10 +32,15 @@ const ENGINE_PROFILES = [
  * between Chrome, Edge and Firefox as the scraper works through a list.
  */
 class BrowserPool {
-    constructor({ headless = true, engines = null } = {}) {
+    constructor({ headless = true, engines = null, maxDomainContexts = 8 } = {}) {
         this.headless = headless;
         this.wanted = engines && engines.length ? engines : ENGINE_PROFILES.map(p => p.name);
         this.browsers = new Map(); // name -> Browser
+        // hostname -> { context, engine }, in least-to-most-recently-used
+        // order (a Map preserves insertion order, and contextForDomain()
+        // re-inserts on every hit to keep it that way) — see contextForDomain()
+        this.domainContexts = new Map();
+        this.maxDomainContexts = maxDomainContexts;
     }
 
     async init() {
@@ -74,7 +79,50 @@ class BrowserPool {
         return { context, engine };
     }
 
+    /**
+     * Like newContext(), but reused across every call for the same hostname
+     * instead of creating a fresh one each time. A brand-new context (the
+     * default newContext() behaviour) starts with an empty cache, empty
+     * cookie jar and no warm TLS/HTTP2 connection — fine the first time a
+     * domain is hit in a run, wasteful every time after, since a site's
+     * shared theme JS/CSS/fonts/header images then get re-downloaded from
+     * scratch for every single product on that site. Reusing one context per
+     * domain lets the browser's own HTTP cache do its job across products,
+     * which is also just how a real visitor's session actually behaves
+     * (one browser identity per site, not a fresh incognito window per page).
+     *
+     * Capped at `maxDomainContexts` (LRU-evicted) so a batch spanning many
+     * different sites doesn't leave dozens of contexts open for the whole
+     * run — each one holds real browser-process memory.
+     */
+    async contextForDomain(hostname) {
+        const key = hostname || "unknown";
+        const existing = this.domainContexts.get(key);
+        if (existing) {
+            // Re-insert to move this key to the most-recently-used end —
+            // a Map preserves insertion order, so delete+set is enough to
+            // keep the whole map in LRU order with no timestamps needed
+            // (and no tie-breaking bugs when two calls land in the same ms).
+            this.domainContexts.delete(key);
+            this.domainContexts.set(key, existing);
+            return { context: existing.context, engine: existing.engine };
+        }
+
+        if (this.domainContexts.size >= this.maxDomainContexts) {
+            const oldestKey = this.domainContexts.keys().next().value;
+            const evicted = this.domainContexts.get(oldestKey);
+            this.domainContexts.delete(oldestKey);
+            await evicted.context.close().catch(() => {});
+        }
+
+        const { context, engine } = await this.newContext();
+        this.domainContexts.set(key, { context, engine });
+        return { context, engine };
+    }
+
     async closeAll() {
+        await Promise.all([...this.domainContexts.values()].map(v => v.context.close().catch(() => {})));
+        this.domainContexts.clear();
         await Promise.all([...this.browsers.values()].map(b => b.close().catch(() => {})));
     }
 }

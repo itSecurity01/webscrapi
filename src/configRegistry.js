@@ -28,6 +28,7 @@ const letstryfoods = require("./configs/letstryfoods");
 const floweraura = require("./configs/floweraura");
 const hyugalife = require("./configs/hyugalife");
 const agaro = require("./configs/agaro");
+const columbia = require("./configs/columbia");
 
 // Adding a new website = one new config file + one new entry here.
 // Nothing in domainRouter.js or scraper.js should ever need to change.
@@ -66,4 +67,5 @@ module.exports = [
     { test: (hostname) => hostname.includes("floweraura.com"), config: floweraura },
     { test: (hostname) => hostname.includes("hyugalife.com"), config: hyugalife },
     { test: (hostname) => hostname.includes("agarolifestyle.com"), config: agaro },
+    { test: (hostname) => hostname.includes("columbiasportswear.co.in"), config: columbia },
 ];
