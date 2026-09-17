@@ -1,29 +1,3 @@
-// Config for tatacliq.com, built against a real product page (Rangmanch by
-// Pantaloons Calypso Coral Embroidered Regular Fit Kurta,
-// /p-mp000000032018703) supplied by the user on 2026-09-11.
-//
-// TataCliq's core PDP fields (name/price/images/description) render server-
-// side with real class names (not atomic/hashed like Shopsy), so these are
-// more stable than the Shopsy config — but re-verify against a live page
-// before production use, same as every config in this repo.
-//
-// TataCliq emits schema.org Product JSON-LD, and (confirmed via a real
-// --headed run) it covers name/brand/price/description/images/colors —
-// scraper.js tries JSON-LD before any DOM selector below, so check
-// `trace.*.source === "json-ld"` first; most of the DOM selectors here only
-// end up used for `sizes` (no JSON-LD equivalent found) and the
-// `additionalFields` below (mrp/offers/seller/spec-table, none of which
-// JSON-LD carries). NOTE: scraper.js's `brand` field only ever reads
-// JSON-LD (`jsonLd.brand.name`), no DOM fallback exists in scraper.js
-// itself — that's fine here since JSON-LD does carry it, but the DOM brand
-// name is *also* captured as `additionalInfo.brandName` as a backup in case
-// a future page render omits it from JSON-LD.
-//
-// IMPORTANT: the page is client-side rendered — on first navigation the DOM
-// only has header/footer chrome, no product content (confirmed via
-// failure screenshot). `beforeExtract` below waits for real product markup
-// or JSON-LD to appear before extracting; don't remove that wait or you'll
-// get `product.name: null` validation failures again.
 module.exports = {
     name: "tatacliq",
 
@@ -61,9 +35,41 @@ module.exports = {
         // the actual Product JSON-LD landing happen together, ~4-8s in, so
         // the DOM selector alone is the correct — and sufficient — readiness
         // signal; no need to special-case the script tag at all.
+        //
+        // TEMPLATE FIX (2026-09-17): TataCliq serves at least two different
+        // PDP layouts depending on category. Apparel/fashion listings use
+        // the "Updated" gallery component (.ProductGalleryDesktopUpdated__*),
+        // which is what this file was originally built and confirmed
+        // against. Other categories (confirmed here on an electronics
+        // accessory — a USB-C cable) render the older/legacy gallery
+        // component instead: .ProductGalleryDesktop__image (no "Updated"
+        // suffix, singular not plural). Because that class never existed on
+        // this page, the gallery half of the wait never matched — it was
+        // only resolving via the product-name selector. Harmless for the
+        // wait itself (still resolves fine off the title), but it meant the
+        // `images` selector below was pointed at a component that doesn't
+        // exist on this template and came back empty. Added the legacy
+        // gallery container to the wait, and switched `images` below to a
+        // selector that matches the shared underlying <img> component used
+        // by both templates.
+        // TEMPLATE FIX (2026-09-17, round 2): a third PDP layout exists
+        // beyond the fashion/electronics ones above — confirmed on a Beauty
+        // & Grooming listing (a makeup-fixer spray), which renders under
+        // `.PdpBeautyDesktop__container` and has NEITHER of the two gallery
+        // classes above nor a Product JSON-LD block (only WebSite/
+        // Organization schema — no `offers`/`image`/`description`). Without
+        // this selector in the wait list, the wait burned the full 20s
+        // timeout on every beauty product (confirmed via live run) and only
+        // the generic `h1` fallback in `title` ever resolved — price,
+        // description, images and every additionalField came back null.
         await page
             .waitForSelector(
-                [".ProductDetailsMainCard__productName", ".ProductGalleryDesktopUpdated__images"].join(", "),
+                [
+                    ".ProductDetailsMainCard__productName",
+                    ".ProductGalleryDesktopUpdated__images",
+                    ".ProductGalleryDesktop__content",
+                    ".PdpBeautyDesktop__container",
+                ].join(", "),
                 { timeout: 20000, state: "visible" }
             )
             .catch(() => {});
@@ -90,29 +96,86 @@ module.exports = {
 
     selectors: {
         // Confirmed: <h1 class="ProductDetailsMainCard__productName">
-        title: [".ProductDetailsMainCard__productName", "h1"],
+        // Shared across fashion/electronics PDP templates.
+        // TEMPLATE FIX (2026-09-17, round 2): the Beauty & Grooming template
+        // uses <h1 class="ProductAndBrandComponent__product-desc"> instead —
+        // added ahead of the generic "h1" catch-all so it's picked
+        // specifically rather than relying on there being only one h1.
+        title: [".ProductDetailsMainCard__productName", ".ProductAndBrandComponent__product-desc", "h1"],
 
         // Confirmed: the "MRP: ₹1699" line. NOTE — the same block also
         // carries <meta itemprop="lowPrice" content="1699">, which would be
         // a cleaner numeric source, but extractText() in scraper.js only
         // reads textContent, not attributes, so the <h3> text is used and
         // parse.price below strips the "MRP:" label / ₹ symbol / commas.
-        price: [".ProductDetailsMainCard__price h3", '[itemprop="lowPrice"]', ".price"],
+        // Shared across fashion/electronics PDP templates.
+        // TEMPLATE FIX (2026-09-17, round 2): Beauty & Grooming template has
+        // no JSON-LD `offers.price` at all (confirmed — only WebSite/
+        // Organization schema on the page), so this DOM fallback is the
+        // *only* source of price there. Confirmed markup:
+        // <h3 class="PriceComponent__discounted-price">₹551</h3>.
+        price: [
+            ".ProductDetailsMainCard__price h3",
+            ".PriceComponent__discounted-price",
+            '[itemprop="lowPrice"]',
+            ".price",
+        ],
 
         // Confirmed: short marketing blurb above the spec table. Falls back
         // to the full `itemprop="description"` block, which on this page
         // also contains the trailing Fit/Pattern/Length/... key-value rows
         // as plain nested text (no separator) — fine as a last-resort
-        // fallback, but expect it to look a bit run-together.
-        description: [".Accordion__shortDescription", '[itemprop="description"]', "#EPMD"],
+        // fallback, but expect it to look a bit run-together. On the
+        // electronics template `.Accordion__shortDescription` doesn't
+        // exist, so it correctly falls through to `#EPMD` /
+        // `[itemprop="description"]`, which is present on both templates.
+        // TEMPLATE FIX (2026-09-17, round 2): Beauty & Grooming template has
+        // no `itemprop="description"` block either — confirmed the "What it
+        // is:" blurb instead lives at
+        // `.DetailsComponent__what-it-is-desc`. Added ahead of the other
+        // fallbacks since it's the most specific match for that template.
+        description: [
+            ".Accordion__shortDescription",
+            ".DetailsComponent__what-it-is-desc",
+            '[itemprop="description"]',
+            "#EPMD",
+        ],
 
-        // Confirmed: gallery <img> tags. extractImages() picks the largest
-        // srcset candidate automatically; these are plain `src` (protocol-
-        // relative, e.g. "//img.tatacliq.com/..."), which normalizeUrl()
-        // resolves fine against the page URL.
-        images: [".ProductGalleryDesktopUpdated__images"],
+        // TEMPLATE FIX (2026-09-17): the original selector
+        // `.ProductGalleryDesktopUpdated__images` only exists on the
+        // fashion template. Confirmed here (electronics/legacy template)
+        // that gallery images instead live inside per-thumbnail
+        // `.ProductGalleryDesktop__image` wrappers, but every image in both
+        // templates — main, thumbs, and zoom — renders through the same
+        // shared `<img class="Image__actual">` component. Matching on that
+        // directly is template-agnostic and more robust than chasing
+        // whichever gallery wrapper class TataCliq ships next. Kept the two
+        // wrapper-level selectors first since they scope more tightly
+        // (avoids picking up unrelated Image__actual instances elsewhere on
+        // the page, e.g. in the "More From Brand" carousel) and fall back
+        // to the shared image class only if neither wrapper is present.
+        // TEMPLATE FIX (2026-09-17, round 2): Beauty & Grooming template's
+        // gallery renders through neither wrapper above nor the shared
+        // `Image__actual` component — confirmed its images are
+        // `<img class="GalleryImagesComponent__image-gallery-img">`. NOTE:
+        // this template's `<img>` also carries a `data-src` attribute set to
+        // a React object rather than a URL, which serializes in the DOM as
+        // the literal text "[object Object]" — confirmed via live
+        // `img.dataset.src` read. scraper.js's extractImages() used to
+        // prefer `dataset.src` over `src` unconditionally, which would have
+        // silently turned every image on this template into that same
+        // broken URL; fixed there to ignore that exact literal instead of
+        // special-casing it per-config.
+        images: [
+            ".ProductGalleryDesktopUpdated__images",
+            ".ProductGalleryDesktop__content",
+            "img.Image__actual",
+            "img.GalleryImagesComponent__image-gallery-img",
+        ],
 
         // Confirmed: size pills (S/M/L/XL/XXL in the supplied markup).
+        // Not present on non-apparel listings (e.g. this cable) — that's
+        // expected/correct, not a bug; comes back as an empty array.
         sizes: [".SizeSelectNewPdp__sizeTexts", '[id^="pdpSize-"]'],
 
         // NOT present in the supplied markup — this product has no color-
@@ -127,27 +190,62 @@ module.exports = {
     // Arbitrary extra fields beyond the fixed product shape.
     additionalFields: {
         // Confirmed: brand name — see module comment above for why this
-        // isn't the top-level `product.brand`.
-        brandName: ['#pd-brand-name span[itemprop="name"]', ".ProductDetailsMainCard__brandName"],
+        // isn't the top-level `product.brand`. Shared across fashion/
+        // electronics templates.
+        // TEMPLATE FIX (2026-09-17, round 2): Beauty & Grooming template
+        // renders it as <a class="ProductAndBrandComponent__brand-name">.
+        brandName: [
+            '#pd-brand-name span[itemprop="name"]',
+            ".ProductDetailsMainCard__brandName",
+            ".ProductAndBrandComponent__brand-name",
+        ],
 
-        // Confirmed: same node as `price` above — on this page "MRP" *is*
-        // the only price shown (no separate struck-through original next to
-        // it), so mrp mirrors price here. If a future listing shows a
-        // genuine discounted price next to a struck-through MRP, split
-        // these into two different selectors.
-        mrp: [".ProductDetailsMainCard__price h3"],
+        // TEMPLATE FIX (2026-09-17): the original comment noted "if a
+        // future listing shows a genuine discounted price next to a
+        // struck-through MRP, split these into two different selectors" —
+        // this cable is exactly that case (price ₹790, MRP ₹1900, 58% off).
+        // `.ProductDetailsMainCard__cancelPrice` holds the real crossed-out
+        // MRP when a discount is active. Falls back to mirroring `price`
+        // (the old behavior) for listings with no separate MRP shown at
+        // all, so non-discounted products still resolve to something
+        // sensible instead of null.
+        // TEMPLATE FIX (2026-09-17, round 2): Beauty & Grooming template's
+        // struck-through MRP is <span class="PriceComponent__slash-price">.
+        mrp: [
+            ".ProductDetailsMainCard__cancelPrice",
+            ".PriceComponent__slash-price",
+            ".ProductDetailsMainCard__price h3",
+        ],
 
         // Confirmed: "Get this for only ₹1359" coupon-based best price
         // (distinct from MRP — requires applying an offer code at checkout).
+        // Shared across fashion/electronics templates. Not applicable to
+        // the Beauty & Grooming template (no equivalent coupon-price
+        // callout there) — expected to come back empty, not a bug.
         bestOfferPrice: [".ProductDescriptionPage__offerprice"],
 
         // Confirmed: "Sold By 1 Aditya Birla Fashion And Retail Limited".
         // Raw text kept as-is (the leading "1" looks like a stray
         // icon/count rendered inline) — clean up downstream if needed.
-        sellerName: [".ProductDescriptionPage__soldByText"],
+        // TEMPLATE FIX (2026-09-17): `.ProductDescriptionPage__soldByText`
+        // doesn't exist on the electronics/legacy template — seller info
+        // there renders as "Sold directly by True Accessories" inside
+        // `.ProductDescriptionPage__winningSellerTexts`. Added as a
+        // fallback.
+        // TEMPLATE FIX (2026-09-17, round 2): Beauty & Grooming template
+        // uses yet another class for the same "Sold directly by X" line —
+        // `.BeautyOtherSellersLink__winningSellerTexts`.
+        sellerName: [
+            ".ProductDescriptionPage__soldByText",
+            ".ProductDescriptionPage__winningSellerTexts",
+            ".BeautyOtherSellersLink__winningSellerTexts",
+        ],
 
         // Confirmed: "Viscose, Hand Wash" fabric/care line, second info row
-        // under the size selector (first row is the size-chart note).
+        // under the size selector (first row is the size-chart note). Not
+        // applicable to non-apparel listings (e.g. this cable, where
+        // `.ModalFit__product_desc_desktop` renders with no children) —
+        // expected to come back empty there, not a bug.
         fabricCare: [".ModalFit__product_desc_desktop > div:nth-child(2)"],
 
         // Confirmed but deliberately raw/positional: every "Fabric:",
@@ -160,20 +258,83 @@ module.exports = {
         // separator) for a reviewer to read, rather than guessing brittle
         // :nth-of-type(N) positions that will silently misalign on any
         // product with a different attribute set.
+        //
+        // TEMPLATE FIX (2026-09-17): `finerDetailsRaw`'s selector is tied
+        // to the Updated gallery and is genuinely absent on the
+        // electronics/legacy and Beauty & Grooming templates (no "Finer
+        // Details" flyout on either) — left as-is, expected empty there.
+        //
+        // `productDetailsRaw`'s original selector
+        // (.ProductDescriptionPage__contentDetailsPDP) doesn't exist on the
+        // electronics/legacy template at all — confirmed the full spec
+        // table there (Color Family, Color, Cable Length, In the Box, Net
+        // Quantity, Connectivity, Connector, Warranty Description/Summary,
+        // Product Depth/Width/Height/Weight, Cord Length) instead renders
+        // as repeated `.ProductFeatures__content` blocks (each one a
+        // header+value pair) across several Accordion panels (General
+        // Features, Technical Features, Connectivity, Warranty,
+        // Dimensions). Added as a fallback selector so this template's
+        // specs are no longer silently dropped.
+        //
+        // CONFIRMED (2026-09-17, round 2), via live run: extractList() in
+        // scraper.js tries selectors in order and stops at the *first* one
+        // with any matches — it does not union across the whole list. That
+        // matters here because the electronics-template product's raw spec
+        // table came back populated only from `.ProductFeatures__content`,
+        // never touching `.ProductDescriptionPage__contentDetailsPDP` (not
+        // present on that template anyway, so harmless there) — but it
+        // means selector order in this list is a real priority order, not
+        // just a wishlist.
+        //
+        // TEMPLATE FIX (2026-09-17, round 2): Beauty & Grooming template's
+        // spec rows ("Net Quantity: 1", etc.) render as repeated
+        // `.DetailsLongComponent__product-details-block` blocks — added as
+        // a third fallback.
         finerDetailsRaw: { selectors: [".ProductGalleryDesktopUpdated__productAttributeObject"], multiple: true },
-        productDetailsRaw: { selectors: [".ProductDescriptionPage__contentDetailsPDP"], multiple: true },
+        productDetailsRaw: {
+            selectors: [
+                ".ProductDescriptionPage__contentDetailsPDP",
+                ".ProductFeatures__content",
+                ".DetailsLongComponent__product-details-block",
+            ],
+            multiple: true,
+        },
 
-        // NOT confirmed — no rating/review UI was visible for this specific
-        // product (page showed "Share your opinion", i.e. zero reviews).
-        // Best-effort guesses for products that do have ratings.
-        rating: [".ProductDetailsMainCard__ratingValue", '[itemprop="ratingValue"]'],
+        // Confirmed via itemprop fallback on fashion/electronics templates
+        // — the electronics template's rating value renders under a
+        // different class (.ProductDetailsMainCard__reviewElectronics) but
+        // still carries itemprop="ratingValue"/"reviewCount", so the
+        // fallback selectors already handle it correctly.
+        // TEMPLATE FIX (2026-09-17, round 2): Beauty & Grooming template has
+        // no `itemprop="ratingValue"` at all (confirmed — only
+        // `itemprop="reviewCount"`/`"ratingCount"` exist there, which is why
+        // reviewCount already worked and rating didn't). Its numeric rating
+        // instead renders as
+        // <span class="RatingsAndReviewsComponent__rating-value">.
+        rating: [
+            ".ProductDetailsMainCard__ratingValue",
+            '[itemprop="ratingValue"]',
+            ".RatingsAndReviewsComponent__rating-value",
+        ],
         reviewCount: [".ProductDetailsMainCard__ratingCount", '[itemprop="reviewCount"]'],
 
-        // NOT confirmed — no "% off" badge was visible near the price in
-        // the supplied markup (only the flat-off coupon codes in the Offers
-        // section, which are conditional on applying a code). Best-effort
-        // guesses only.
-        discountPercent: [".ProductDetailsMainCard__discountText", ".PriceSection__discount"],
+        // TEMPLATE FIX (2026-09-17): confirmed on the electronics/legacy
+        // template — the discount badge next to price is
+        // `.ProductDetailsMainCard__discount` ("58% Off"), not
+        // `...discountText`. Reordered so the confirmed class is primary,
+        // kept the old guess and the gallery-badge fallback
+        // (`.PdpFlags__offer`, "58% off" — confirmed present on this
+        // product too) as backups.
+        // TEMPLATE FIX (2026-09-17, round 2): Beauty & Grooming template's
+        // "(15% OFF)" text sits in
+        // <span class="PriceComponent__discount-percentage">.
+        discountPercent: [
+            ".ProductDetailsMainCard__discount",
+            ".ProductDetailsMainCard__discountText",
+            ".PriceSection__discount",
+            ".PdpFlags__offer",
+            ".PriceComponent__discount-percentage",
+        ],
     },
 
     parse: {

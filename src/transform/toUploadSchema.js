@@ -41,6 +41,14 @@ function randomRating() {
     return Math.random() < 0.5 ? 4 : 5;
 }
 
+/** Round to a whole star and clamp into [3, 5] — every rating shown on the
+ * storefront must read as a decent product (3-5 stars, never a float), so a
+ * genuine-but-bad scraped rating (e.g. a real 1-star average) is floored up
+ * to 3 rather than passed through as-is. */
+function clampRating(n) {
+    return Math.max(3, Math.min(5, Math.round(n)));
+}
+
 /**
  * Pick the image URL list to expose as image/subImages. Prefers
  * images that actually downloaded successfully (a stronger signal the URL is
@@ -71,9 +79,13 @@ function transformProduct(productJson) {
     // Prefer a real scraped rating (a config's additionalFields.rating, e.g.
     // boat.js's ".rating__stars") when one is present and parses to a
     // positive number; only fall back to the random placeholder when the
-    // site genuinely gave us nothing to go on. Rounded to a whole number —
-    // ratings are stored as plain integers, not decimals.
-    const scrapedRating = Math.round(parseNumber(additionalInfo.rating));
+    // site genuinely gave us nothing to go on. Check presence on the raw
+    // parsed number (clampRating(0) would otherwise read as a legitimate
+    // "3", indistinguishable from a real 3-star rating), then clamp
+    // whichever real value was found into a whole number in [3, 5] — see
+    // clampRating().
+    const rawRating = parseNumber(additionalInfo.rating);
+    const scrapedRating = rawRating > 0 ? clampRating(rawRating) : 0;
 
     const productPrice = parseNumber(product.price);
     const scrapedMrp = parseNumber(additionalInfo.mrp);

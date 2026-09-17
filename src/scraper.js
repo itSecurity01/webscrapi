@@ -67,11 +67,22 @@ async function extractImages(page, selectors, baseUrl) {
             if (count === 0) continue;
 
             const raw = await locator.evaluateAll(imgs =>
-                imgs.map(img => ({
-                    src: img.currentSrc || img.src || null,
-                    dataSrc: img.dataset ? (img.dataset.src || null) : null,
-                    srcset: img.srcset || null,
-                }))
+                imgs.map(img => {
+                    // Some sites (confirmed on TataCliq's beauty-category PDP
+                    // template) set `data-src` to a React object rather than
+                    // a URL string, which stringifies to the literal text
+                    // "[object Object]" in the DOM. That's never a real
+                    // image path — normalizeUrl() would otherwise happily
+                    // resolve it into a bogus-but-truthy URL (e.g.
+                    // ".../[object%20Object]") that silently 404s on
+                    // download, masking the real `src`. Treat it as absent.
+                    const datasetSrc = img.dataset ? img.dataset.src : null;
+                    return {
+                        src: img.currentSrc || img.src || null,
+                        dataSrc: datasetSrc && datasetSrc !== "[object Object]" ? datasetSrc : null,
+                        srcset: img.srcset || null,
+                    };
+                })
             );
 
             const urls = raw
