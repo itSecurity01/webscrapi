@@ -13,14 +13,33 @@
 // Nykaa redesign, since a rebuild can reassign these hashes. Kept minimal
 // and JSON-LD-first specifically because of this fragility — see below.
 //
-// Confirmed live: the page ships exactly ONE `<script type="application/
-// ld+json">`, holding a JSON ARRAY of two nodes — a "Product" node (name/
-// image/mpn/sku/brand/description/offers/aggregateRating) and a
-// "BreadcrumbList" node. findProductNodes() in scraper.js already handles
-// an array payload and correctly finds the Product node, so name/brand/
-// price/currency/sku all come through with NO fix needed. `brand` is a
-// plain string ("Bronson Professional", not `{name: ...}`) — scraper.js's
-// brand extraction already handles both shapes.
+// SPOT-CHECK (2026-09-17, static only — no live navigation, markup pasted
+// by a user against a second, unrelated product: Forest Essentials
+// Nayantara Clear Lash/Brow Serum, /p/1323960): `.css-1jczs19` (price) and
+// `.slide-view-container img` (gallery) both still matched correctly
+// against this different product's rendered DOM, which is a good sign the
+// hashes are stable across products within one deployment, not just
+// per-page. `.css-u05rr` (mrp) and `.css-bhhehx` (discountPercent) were
+// absent on this second product too, but that's this product's own data —
+// no strikethrough MRP or discount badge is shown for it at all — not a
+// broken selector. NOT checked: the pasted markup for this second product
+// cut off before the "Product Description" section rendered and did not
+// include any <script type="application/ld+json"> tags, so neither the
+// heading-match below nor the JSON-LD node shape it depends on could be
+// verified against this product. If description is coming back as a
+// duplicate of the title, that's the first place to look — start by
+// checking the actual heading text/casing on the page and the shape of the
+// ld+json payload.
+//
+// Confirmed live (original product): the page ships exactly ONE `<script
+// type="application/ld+json">`, holding a JSON ARRAY of two nodes — a
+// "Product" node (name/image/mpn/sku/brand/description/offers/
+// aggregateRating) and a "BreadcrumbList" node. findProductNodes() in
+// scraper.js already handles an array payload and correctly finds the
+// Product node, so name/brand/price/currency/sku all come through with NO
+// fix needed. `brand` is a plain string ("Bronson Professional", not
+// `{name: ...}`) — scraper.js's brand extraction already handles both
+// shapes.
 //
 // TWO confirmed gaps in that native Product node, both fixed the same
 // fetch-nothing / DOM-read-and-patch way (no API endpoint like Shopify's
@@ -48,12 +67,31 @@
 //    before reading the text, same "leaking style tag" shape as
 //    plumgoodness.js's ingredients section elsewhere in this repo.
 //
+//    ROBUSTNESS FIX (2026-09-17, static, unverified live): the heading
+//    match used to require an EXACT, case-sensitive "Product Description"
+//    string. That's brittle by construction — a different category
+//    rendering it as "Product description" (lowercase d), with an SVG
+//    icon inline, or with different trailing whitespace would silently
+//    no-op the whole fix (both this injection and the DOM fallback
+//    selector below), leaving the duplicate-title description in place
+//    with no error raised anywhere. Loosened to a case-insensitive,
+//    whitespace-normalized match against a short list of plausible
+//    heading variants. Only "Product Description" is actually confirmed
+//    live (on the massager product) — the others are unverified guesses
+//    at likely category-specific variants, included defensively, not
+//    confirmed. Delete them if they turn out to cause a false-positive
+//    match somewhere, or better, replace this whole heading-text approach
+//    with a real selector once one's been checked live against a couple
+//    more categories.
+//
 // 2. GAP: `image` is a single photo; the real gallery has 7 (confirmed via
 //    `.slide-view-container img`, matching the "product image1..7" alt
 //    text). Same non-empty-but-incomplete-array gotcha as bellavita.js —
 //    scraper.js only falls back to DOM when the JSON-LD image list is
 //    entirely empty, so a lone image is taken as-is otherwise. Fixed below
-//    by overwriting `image` with the full gallery list.
+//    by overwriting `image` with the full gallery list. Re-confirmed
+//    (statically) against a second product on 2026-09-17: same
+//    `.slide-view-container img` shape, 8 images that time.
 //
 // CONFIRMED PRICE TRAP, same shape as sangeetha.js/plumgoodness.js in this
 // repo, but sharper here: the "Customers also Viewed" recommendation
@@ -83,6 +121,36 @@
 // `colors` are omitted rather than guessed. A Nykaa product that DOES ship
 // a shade picker (common for makeup) will need real selectors added here
 // once one's been checked live — not yet seen on any page checked so far.
+//
+// DIAGNOSIS (2026-09-17): user reported price AND images both failing to
+// extract on the Forest Essentials product, with the actual ld+json
+// payload provided directly (not re-derived). Confirmed from that payload:
+// `offers.price` is `1495` — a JSON NUMBER, not a string. Every other
+// price selector/parse pair in this repo (including this one) was written
+// assuming `parse.price` receives a raw DOM text string like `" ₹790"` and
+// strips currency symbols/commas with string methods. If `parsePrice()` in
+// ../utils/price does anything like `raw.replace(...)` internally, handing
+// it a bare number instead of a string throws a TypeError — not an empty
+// field, an uncaught crash. NOT confirmed against the actual utils/price.js
+// source (not available here), so this is a strong hypothesis, not a
+// verified root cause — but it would tidily explain BOTH fields failing
+// together despite being otherwise-unrelated code paths (JSON-LD price vs.
+// DOM-scraped gallery), if a crash mid-price-resolution aborts extraction
+// before images are ever read. Hardened `parse.price` below to coerce to a
+// string first regardless — safe no-op if this wasn't the actual cause,
+// fixes it outright if it was. If price/images are still failing after
+// this, the cause is upstream in scraper.js's own extraction/error-handling
+// (not reachable from a config file) and needs an actual stack trace or
+// console error to pin down further.
+//
+// Also folded the description-heading candidates out of a module.exports
+// self-reference (`module.exports._descriptionHeadings`, from the previous
+// pass) into a plain module-scoped constant below. Functionally
+// equivalent, but removes a hypothetical failure mode if this file's
+// harness clones/wraps the exported object in a way that could detach the
+// `module` closure reference — cheap insurance, not a confirmed cause.
+const DESCRIPTION_HEADINGS = ["Product Description", "Product description", "About the Product", "Description"];
+
 module.exports = {
     name: "nykaa",
 
@@ -109,16 +177,53 @@ module.exports = {
             await page.waitForTimeout(350);
         }
         await page
-            .waitForFunction(() => {
-                const h2 = Array.from(document.querySelectorAll("h2")).find(h => h.textContent.trim() === "Product Description");
+            .waitForFunction((headings) => {
+                const norm = (s) => (s || "").trim().replace(/\s+/g, " ").toLowerCase();
+                const wanted = headings.map(norm);
+                const h2 = Array.from(document.querySelectorAll("h2")).find(h => wanted.includes(norm(h.textContent)));
                 const body = h2 && h2.nextElementSibling;
                 return !!(body && body.textContent.length > 200);
-            }, { timeout: 10000 })
+            }, DESCRIPTION_HEADINGS, { timeout: 10000 })
+            .catch(() => {});
+
+        // MRP FALLBACK (2026-09-17, requested by user): this product has
+        // no active discount, so there's no real `.css-u05rr` MRP element
+        // for `additionalFields.mrp` to find — it legitimately comes back
+        // empty, which reads as "missing" data even though it's correct.
+        // Per request, when no genuine struck-through MRP exists, mirror
+        // `price`'s own text into a hidden synthetic node carrying the
+        // same `.css-u05rr` class, so `mrp` resolves to the same value as
+        // `price` instead of coming back empty. Only fires when a real MRP
+        // node is NOT already present, so an actual discount is never
+        // overwritten. This makes `discountPercent` (`.css-bhhehx`) stay
+        // correctly empty in this case — there's no real "58% off"-style
+        // badge to mirror, and synthesizing a fake "0% off" would be
+        // actively wrong, so that field is deliberately left alone.
+        await page
+            .evaluate(() => {
+                try {
+                    const hasRealMrp = document.querySelector(".css-u05rr");
+                    const priceEl = document.querySelector(".css-1jczs19");
+                    if (!hasRealMrp && priceEl && priceEl.textContent) {
+                        const synthetic = document.createElement("span");
+                        synthetic.className = "css-u05rr";
+                        synthetic.setAttribute("data-synthetic-mrp", "mirrors-price");
+                        synthetic.textContent = priceEl.textContent;
+                        synthetic.style.display = "none";
+                        priceEl.insertAdjacentElement("afterend", synthetic);
+                    }
+                } catch {
+                    // no-op — mrp just stays empty, same as before this fix
+                }
+            })
             .catch(() => {});
 
         // See the big module comment above for *why* this exists.
-        await page.evaluate(() => {
+        await page.evaluate((headings) => {
             try {
+                const norm = (s) => (s || "").trim().replace(/\s+/g, " ").toLowerCase();
+                const wanted = (headings || []).map(norm);
+
                 const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
                 for (const script of scripts) {
                     let data;
@@ -135,12 +240,11 @@ module.exports = {
                     if (!product) continue;
 
                     // Fix 1: real description, style tag stripped. Found
-                    // via the "Product Description" heading's text rather
-                    // than a hashed class (see the beforeExtract comment
-                    // above on this section's own lazy-mount timing) —
-                    // more resilient to a future CSS-in-JS rebuild than
-                    // hardcoding e.g. ".css-13tku5v".
-                    const descHeading = Array.from(document.querySelectorAll("h2")).find(h => h.textContent.trim() === "Product Description");
+                    // via the description heading's text (case-insensitive,
+                    // whitespace-normalized — see ROBUSTNESS FIX comment
+                    // above) rather than a hashed class, for resilience to
+                    // a future CSS-in-JS rebuild.
+                    const descHeading = Array.from(document.querySelectorAll("h2")).find(h => wanted.includes(norm(h.textContent)));
                     const descEl = descHeading && descHeading.nextElementSibling;
                     if (descEl) {
                         const clone = descEl.cloneNode(true);
@@ -166,7 +270,7 @@ module.exports = {
                 // Swallow — falls through to the lazy title-as-description,
                 // single JSON-LD image, and the DOM selectors below.
             }
-        });
+        }, DESCRIPTION_HEADINGS);
     },
 
     selectors: {
@@ -182,15 +286,17 @@ module.exports = {
         price: [".css-1jczs19"],
 
         // Confirmed, but only as a fallback in practice — the injected
-        // JSON-LD above already carries the full, real description. Same
-        // heading-anchored lookup as the injection (Playwright's
-        // `:text-is()` + adjacent-sibling combinator, confirmed working
-        // live), not the hashed class, for the same resilience reason.
-        // Note this raw DOM path (unlike the injected fix) does NOT strip
-        // the embedded <style> tag's CSS text out of the result.
-        description: ['h2:text-is("Product Description") + div'],
+        // JSON-LD above already carries the full, real description.
+        // ROBUSTNESS FIX (2026-09-17): switched from Playwright's
+        // `:text-is()` (exact, case-sensitive match) to `:has-text()`
+        // (case-insensitive substring match) for the same reason as the
+        // heading-matching change above — an exact match is one casing
+        // change away from silently returning nothing. Note this raw DOM
+        // path (unlike the injected fix) does NOT strip the embedded
+        // <style> tag's CSS text out of the result.
+        description: ['h2:has-text("Product Description") + div'],
 
-        // Confirmed: the real 7-photo gallery. Only used as a fallback in
+        // Confirmed: the real photo gallery. Only used as a fallback in
         // practice — the beforeExtract fix above already patches the
         // native JSON-LD's `image` field with this same full list.
         images: [".slide-view-container img"],
@@ -202,14 +308,27 @@ module.exports = {
         // Confirmed: struck-through MRP (e.g. "₹400"). Same leaf-class
         // safety as `price` above (confirmed staying at 2 matches, both
         // the real product's own value, even with recommendations
-        // rendered).
+        // rendered). Comes back empty on products with no active discount
+        // shown at all (confirmed on a second product, 2026-09-17) — that's
+        // correct behavior, not a selector bug.
         mrp: [".css-u05rr"],
 
-        // Confirmed: "28% Off" badge next to the price.
+        // Confirmed: "28% Off" badge next to the price. Same "empty on a
+        // no-discount product is correct" note as `mrp` above.
         discountPercent: [".css-bhhehx"],
     },
 
     parse: {
-        price: (raw) => require("../utils/price").parsePrice(raw),
+        // DEFENSIVE (2026-09-17): `raw` here can come from either a DOM
+        // text selector (already a string, e.g. " ₹790") or straight from
+        // JSON-LD's `offers.price` (a raw JS number, e.g. 1495 — confirmed
+        // via the actual payload for the Forest Essentials product).
+        // parsePrice() was written assuming a string to strip ₹/commas
+        // from; feeding it a bare number risks a crash inside a string
+        // method. String(raw) makes this safe for either shape. See the
+        // DIAGNOSIS comment in the module header for the reasoning — this
+        // is a strong hypothesis for the "price and images both failing"
+        // report, not a confirmed root cause.
+        price: (raw) => require("../utils/price").parsePrice(String(raw)),
     },
 };
