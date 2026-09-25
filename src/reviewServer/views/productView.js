@@ -1,4 +1,4 @@
-const { layout, esc, jsAttr } = require("./layout");
+const { layout, esc, jsAttr, icon, noticeBanner } = require("./layout");
 
 function productView(draft, imageEntries, { saved = false } = {}) {
     const meta = draft._meta;
@@ -9,13 +9,13 @@ function productView(draft, imageEntries, { saved = false } = {}) {
     const gallery = imageEntries.map(entry => `
         <div class="gallery-item" draggable="true" data-url="${esc(entry.url)}">
           <img src="${esc(entry.displayUrl)}" onerror="this.style.display='none'">
-          <button type="button" class="gallery-item__remove" title="Remove image" onclick="removeGalleryImage(this)">✕</button>
+          <button type="button" class="gallery-item__remove" title="Remove image" onclick="removeGalleryImage(this)">${icon("xmark")}</button>
         </div>`).join("");
     const deleteAction = `/product/${encodeURIComponent(meta.site)}/${encodeURIComponent(meta.slug)}/delete`;
     const confirmMsg = `Delete “${jsAttr(draft.name)}”? This permanently removes its scraped data (images, product.json, upload.json) from output/. This cannot be undone.`;
 
     const body = `
-      <p class="back-link"><a href="/">&larr; back to all products</a></p>
+      <p class="back-link"><a href="/">${icon("arrow-left")} back to all products</a></p>
 
       <div class="panel">
         <div class="row">
@@ -25,25 +25,27 @@ function productView(draft, imageEntries, { saved = false } = {}) {
               <span class="price">₹${esc(draft.productPrice)}</span>
               <span class="mrp">₹${esc(draft.mrp)}</span>
               <span class="discount">${esc(draft.discount)}% off</span>
-              <span class="rating">★ ${esc(draft.rating)}</span>
+              <span class="rating">${icon("star")} ${esc(draft.rating)}</span>
             </div>
-            <p class="muted">SKU: ${esc(draft.vendorSku)} · Source: <a href="${esc(meta.sourceUrl)}" target="_blank" rel="noopener">👁️ ${esc(meta.site)}</a></p>
+            <p class="muted">SKU: ${esc(draft.vendorSku)} · Source: <a href="${esc(meta.sourceUrl)}" target="_blank" rel="noopener">${icon("arrow-up-right-from-square")} ${esc(meta.site)}</a></p>
+            <div class="field-group-label">Images</div>
             <div class="gallery" id="gallery">${gallery}</div>
-            <p class="muted" id="gallery-empty" ${imageEntries.length > 0 ? 'hidden' : ""}>No images. Drag to reorder, ✕ to remove — changes are saved when you click Save below.</p>
+            <p class="muted" id="gallery-empty" ${imageEntries.length > 0 ? 'hidden' : ""}>No images. Drag to reorder, use the remove button to delete — changes are saved when you click Save below.</p>
           </div>
           <div>
             <form method="post" action="${deleteAction}" onsubmit="return confirm('${confirmMsg}');">
-              <button type="submit" class="danger">🗑️ Delete this product</button>
+              <button type="submit" class="danger">${icon("trash")} Delete this product</button>
             </form>
           </div>
         </div>
       </div>
 
-      ${saved ? '<div class="panel" style="background:#d1fae5;">Saved.</div>' : ""}
+      ${saved ? noticeBanner({ type: "ok", text: "Saved." }) : ""}
 
       <div class="panel">
-        <h2>Edit before upload</h2>
+        <div class="panel-header">${icon("pen")}<h2>Edit before upload</h2></div>
         <form method="post" action="/product/${encodeURIComponent(meta.site)}/${encodeURIComponent(meta.slug)}">
+          <div class="field-group-label">Identity</div>
           <div class="row">
             <div>
               <label>Name</label>
@@ -55,6 +57,7 @@ function productView(draft, imageEntries, { saved = false } = {}) {
             </div>
           </div>
 
+          <div class="field-group-label">Pricing &amp; rating</div>
           <div class="row">
             <div>
               <label>Price</label>
@@ -74,6 +77,7 @@ function productView(draft, imageEntries, { saved = false } = {}) {
             </div>
           </div>
 
+          <div class="field-group-label">Classification</div>
           <div class="row">
             <div>
               <label>Program (id)</label>
@@ -89,6 +93,7 @@ function productView(draft, imageEntries, { saved = false } = {}) {
             </div>
           </div>
 
+          <div class="field-group-label">Variants</div>
           <div class="row">
             <div>
               <label>Sizes (comma-separated)</label>
@@ -100,6 +105,7 @@ function productView(draft, imageEntries, { saved = false } = {}) {
             </div>
           </div>
 
+          <div class="field-group-label">Description</div>
           <label>Vendor comment</label>
           <textarea name="vendorComment">${esc(draft.vendorComment)}</textarea>
 
@@ -109,16 +115,17 @@ function productView(draft, imageEntries, { saved = false } = {}) {
           <label>Additional information</label>
           <textarea name="additionalInformation">${esc(draft.additionalInformation)}</textarea>
 
+          <div class="field-group-label">Media URLs</div>
           <label>Main image URL</label>
           <input type="text" name="image" id="image-input" value="${esc(draft.image)}">
 
           <label>Sub images (one URL per line)</label>
           <textarea name="subImages" id="subimages-input" style="min-height:120px;">${esc((draft.subImages || []).join("\n"))}</textarea>
-          <p class="muted" style="margin-top:4px;">Kept in sync with the gallery above (✕ to remove, drag to reorder) — or edit this list directly, e.g. to add a brand-new image URL.</p>
+          <p class="muted" style="margin-top:4px;">Kept in sync with the gallery above (remove or drag to reorder) — or edit this list directly, e.g. to add a brand-new image URL.</p>
 
           <div style="margin-top:16px; display:flex; gap:10px; align-items:center;">
-            <button type="submit" name="markReviewed" value="1">Save &amp; mark reviewed</button>
-            <button type="submit" name="markReviewed" value="0" class="secondary">Save as draft</button>
+            <button type="submit" name="markReviewed" value="1">${icon("check")} Save &amp; mark reviewed</button>
+            <button type="submit" name="markReviewed" value="0" class="secondary">${icon("floppy-disk")} Save as draft</button>
             <span class="status status-${esc(meta.status)}">${esc(meta.status)}</span>
           </div>
         </form>
@@ -182,7 +189,7 @@ function productView(draft, imageEntries, { saved = false } = {}) {
         });
       </script>`;
 
-    return layout(draft.name, body);
+    return layout(draft.name, body, { active: "dashboard" });
 }
 
 module.exports = { productView };

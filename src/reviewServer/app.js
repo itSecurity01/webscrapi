@@ -70,10 +70,9 @@ function createApp() {
 
     app.get("/", (req, res) => {
         const drafts = store.listDrafts({ site: req.query.site || null });
-        const resolveThumb = (draft) => {
-            const urls = store.resolveImageUrls(draft._meta.site, draft._meta.slug, draft);
-            return urls[0] || "";
-        };
+        // Full list (not just the first) — the dashboard uses more than one
+        // for its on-hover preview card, not only the table thumbnail.
+        const resolveImages = (draft) => store.resolveImageUrls(draft._meta.site, draft._meta.slug, draft);
         const notice = req.query.bulkError === "no-selection"
             ? { type: "error", text: "Nothing was changed — tick the checkbox next to at least one product before clicking Apply." }
             : req.query.bulkApplied
@@ -93,7 +92,7 @@ function createApp() {
                                         : req.query.deleteError
                                             ? { type: "error", text: req.query.deleteError }
                                             : null;
-        res.send(dashboardView(drafts, resolveThumb, notice, pipelineState.getLastArchive()));
+        res.send(dashboardView(drafts, resolveImages, notice, pipelineState.getLastArchive()));
     });
 
     app.get("/product/:site/:slug", (req, res) => {
