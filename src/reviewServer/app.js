@@ -78,19 +78,21 @@ function createApp() {
             ? { type: "error", text: "Nothing was changed — tick the checkbox next to at least one product before clicking Apply." }
             : req.query.bulkApplied
                 ? { type: "ok", text: `Applied to ${req.query.bulkApplied} product(s).` }
-                : req.query.marked
-                    ? { type: "ok", text: `Marked ${req.query.marked} product(s) as uploaded.${req.query.markFailed > 0 ? ` (${req.query.markFailed} failed — see terminal/logs.)` : ""}` }
-                    : req.query.markError
-                        ? { type: "error", text: req.query.markError }
-                        : req.query.archived
-                            ? { type: "ok", text: `Archived ${req.query.archived} product(s) — workspace is clean for the next batch.` }
-                            : req.query.archiveError
-                                ? { type: "error", text: req.query.archiveError }
-                                : req.query.deleted
-                                    ? { type: "ok", text: "Product deleted." }
-                                    : req.query.deleteError
-                                        ? { type: "error", text: req.query.deleteError }
-                                        : null;
+                : req.query.bulkDeleted
+                    ? { type: "ok", text: `Deleted ${req.query.bulkDeleted} product(s).` }
+                    : req.query.marked
+                        ? { type: "ok", text: `Marked ${req.query.marked} product(s) as uploaded.${req.query.markFailed > 0 ? ` (${req.query.markFailed} failed — see terminal/logs.)` : ""}` }
+                        : req.query.markError
+                            ? { type: "error", text: req.query.markError }
+                            : req.query.archived
+                                ? { type: "ok", text: `Archived ${req.query.archived} product(s) — workspace is clean for the next batch.` }
+                                : req.query.archiveError
+                                    ? { type: "error", text: req.query.archiveError }
+                                    : req.query.deleted
+                                        ? { type: "ok", text: "Product deleted." }
+                                        : req.query.deleteError
+                                            ? { type: "error", text: req.query.deleteError }
+                                            : null;
         res.send(dashboardView(drafts, resolveThumb, notice, pipelineState.getLastArchive()));
     });
 
@@ -171,6 +173,23 @@ function createApp() {
 
         store.bulkUpdate(items, updates, { status });
         res.redirect(`/?bulkApplied=${items.length}`);
+    });
+
+    app.post("/bulk-delete", (req, res) => {
+        const selected = [].concat(req.body.selected || []).filter(Boolean);
+
+        if (selected.length === 0) {
+            return res.redirect("/?bulkError=no-selection");
+        }
+
+        const items = selected.map(key => {
+            const [site, slug] = key.split("::");
+            return { site, slug };
+        });
+
+        const results = store.bulkDelete(items);
+        const removed = results.filter(r => r.ok && r.removed).length;
+        res.redirect(`/?bulkDeleted=${removed}`);
     });
 
     // --- Batch: upload an Excel file and run the scrape from the browser (Feature 5a/5b) ---

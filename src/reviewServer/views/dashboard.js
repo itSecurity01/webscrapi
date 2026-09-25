@@ -11,11 +11,14 @@ function row(draft, thumbUrl) {
     const deleteAction = `${editHref}/delete`;
     const sourceUrl = meta.sourceUrl || "";
     const confirmMsg = `Delete “${jsAttr(draft.name)}”? This permanently removes its scraped data (images, product.json, upload.json) from output/. This cannot be undone.`;
+    const hasImage = Boolean(thumbUrl);
 
     return `
     <tr>
-      <td><input type="checkbox" name="selected" value="${esc(key)}" form="bulk-form"></td>
-      <td><img class="thumb" src="${esc(thumbUrl)}" onerror="this.style.visibility='hidden'"></td>
+      <td><input type="checkbox" name="selected" value="${esc(key)}" form="bulk-form" data-has-image="${hasImage ? "1" : "0"}"></td>
+      <td>${hasImage
+            ? `<img class="thumb" src="${esc(thumbUrl)}" onerror="this.parentElement.innerHTML='<span class=&quot;status&quot; style=&quot;background:#fee2e2;color:#991b1b;&quot;>no image</span>'">`
+            : `<span class="status" style="background:#fee2e2;color:#991b1b;">no image</span>`}</td>
       <td><a href="${editHref}">${esc(draft.name)}</a><div class="muted">${esc(meta.site)} / ${esc(meta.slug)}</div></td>
       <td>₹${esc(draft.productPrice)} <span class="muted">(MRP ₹${esc(draft.mrp)})</span></td>
       <td>${esc(draft.discount)}%</td>
@@ -97,8 +100,11 @@ function dashboardView(drafts, resolveThumb, notice, lastArchive) {
     const body = `
       ${noticeHtml}
       <div class="panel">
-        <h2>📝 Bulk-apply to selected</h2>
-        <p class="muted" style="margin-top:-6px;">1. Tick the checkbox next to each product in the table below &nbsp;→&nbsp; 2. Fill in the field(s) to change &nbsp;→&nbsp; 3. Apply.</p>
+        <h2>📝 Bulk-apply / delete selected</h2>
+        <p class="muted" style="margin-top:-6px;">1. Tick the checkbox next to each product in the table below (or use a quick-select button) &nbsp;→&nbsp; 2. Fill in field(s) and Apply, or just Delete the selection.</p>
+        <div style="margin-bottom:14px;">
+          <button type="button" class="secondary" onclick="selectMissingImages()">🖼️ Select products missing images</button>
+        </div>
         <form id="bulk-form" method="post" action="/bulk-apply" onsubmit="return validateBulkForm(this)">
           <div class="row">
             <div>
@@ -118,8 +124,9 @@ function dashboardView(drafts, resolveThumb, notice, lastArchive) {
             <input type="checkbox" name="markReviewed" value="1" checked style="width:auto;display:inline-block;vertical-align:middle;">
             Mark selected products as "reviewed" (ready to upload)
           </label>
-          <div style="margin-top:14px; display:flex; align-items:center; gap:12px;">
+          <div style="margin-top:14px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
             <button type="submit">✅ Apply to selected</button>
+            <button type="submit" formaction="/bulk-delete" formnovalidate class="danger" onclick="return confirmBulkDelete()">🗑️ Delete selected</button>
             <span id="selected-count" class="muted">0 selected</span>
           </div>
         </form>
@@ -170,10 +177,30 @@ function dashboardView(drafts, resolveThumb, notice, lastArchive) {
         function validateBulkForm(form) {
           var n = document.querySelectorAll('input[name=selected]:checked').length;
           if (n === 0) {
-            alert('Tick the checkbox next to at least one product before clicking Apply.');
+            alert('Tick the checkbox next to at least one product first.');
             return false;
           }
           return true;
+        }
+
+        function selectMissingImages() {
+          var found = 0;
+          document.querySelectorAll('input[name=selected]').forEach(function (c) {
+            var missing = c.dataset.hasImage === '0';
+            c.checked = missing;
+            if (missing) found++;
+          });
+          updateSelectedCount();
+          if (found === 0) alert('No products are currently missing images.');
+        }
+
+        function confirmBulkDelete() {
+          var n = document.querySelectorAll('input[name=selected]:checked').length;
+          if (n === 0) {
+            alert('Tick the checkbox next to at least one product first.');
+            return false;
+          }
+          return confirm('Delete ' + n + ' selected product(s)? This permanently removes their scraped data (images, product.json, upload.json) from output/. This cannot be undone.');
         }
 
         document.addEventListener('keydown', function (e) {

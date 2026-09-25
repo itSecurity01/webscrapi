@@ -137,6 +137,19 @@ function deleteDraft(site, slug) {
     return true;
 }
 
+/** Deletes many products' output folders at once (the dashboard's bulk-delete). */
+function bulkDelete(items) {
+    const results = [];
+    for (const { site, slug } of items) {
+        try {
+            results.push({ site, slug, ok: true, removed: deleteDraft(site, slug) });
+        } catch (error) {
+            results.push({ site, slug, ok: false, error: error.message });
+        }
+    }
+    return results;
+}
+
 /**
  * Preview image URLs for a product: local files served through /media if
  * they were downloaded, otherwise the remote CDN URLs stored on the draft
@@ -197,6 +210,7 @@ module.exports = {
     updateDraft,
     bulkUpdate,
     deleteDraft,
+    bulkDelete,
     folderPath,
     resolveImageUrls,
     resolveImageEntries,
